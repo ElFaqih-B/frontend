@@ -1,8 +1,19 @@
-import React from "react"
-import { useCallback, useEffect, useState } from 'react'
+import React from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getJson, postJson } from '../api.js'
+import EmptyState from '../components/EmptyState.jsx'
 import Modal from '../components/Modal.jsx'
+import PageHeader from '../components/PageHeader.jsx'
+import SearchBar from '../components/SearchBar.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
+import {
+  formatFood,
+  formatHealth,
+  formatPosition,
+  normalizePlayer,
+  searchablePlayerText,
+  sortPlayers,
+} from '../utils/players.js'
 
 const ACTIONS = {
   kick: (p) => `kick ${p}`,
@@ -19,89 +30,32 @@ const ACTIONS = {
   feed: (p) => `effect give ${p} minecraft:saturation 1 255`,
 }
 
-function normalizePlayer(player) {
-  if (typeof player === 'string') {
-    return {
-      name: player,
-      valid: true,
-      health: null,
-      food: null,
-      level: null,
-      dimension: null,
-      position: null,
-    }
-  }
+function RoleBadge({ role }) {
+  const text = String(role || 'Member')
+  const lower = text.toLowerCase()
+  let cls = 'role-member'
 
-  if (player && typeof player === 'object') {
-    return {
-      name: player.name || player.username || 'Unknown',
-      valid: player.valid ?? true,
-      health: player.health ?? null,
-      food: player.food ?? null,
-      level: player.level ?? null,
-      dimension: player.dimension ?? null,
-      position: player.position ?? null,
-    }
-  }
+  if (lower.includes('owner') || lower.includes('admin') || lower.includes('op')) cls = 'role-admin'
+  else if (lower.includes('mod') || lower.includes('staff')) cls = 'role-staff'
 
-  return {
-    name: String(player || 'Unknown'),
-    valid: false,
-    health: null,
-    food: null,
-    level: null,
-    dimension: null,
-    position: null,
-  }
-}
-
-function valueOrDash(value) {
-  if (value === null || value === undefined || value === '') return '-'
-  return value
-}
-
-function formatHealth(value) {
-  if (value === null || value === undefined || value === '') return '-'
-
-  const n = Number(value)
-  if (Number.isNaN(n)) return String(value)
-
-  return `${Number.isInteger(n) ? n : n.toFixed(1)}/20`
-}
-
-function formatFood(value) {
-  if (value === null || value === undefined || value === '') return '-'
-
-  const n = Number(value)
-  if (Number.isNaN(n)) return String(value)
-
-  return `${Number.isInteger(n) ? n : n.toFixed(1)}/20`
-}
-
-function formatPosition(position) {
-  if (!position || typeof position !== 'object') return '-'
-
-  const x = position.x ?? '-'
-  const y = position.y ?? '-'
-  const z = position.z ?? '-'
-
-  return `${x}, ${y}, ${z}`
+  return <span className={`role-badge ${cls}`}>{text}</span>
 }
 
 export default function Players() {
   const toast = useToast()
   const [players, setPlayers] = useState([])
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState(null)
   const [extra, setExtra] = useState('')
   const [raw, setRaw] = useState('')
   const [loading, setLoading] = useState(false)
+  const [query, setQuery] = useState('')
+  const [sortBy, setSortBy] = useState('name')
+  const [statusFilter, setStatusFilter] = useState('all')
 
-  const loadP = useCallback(async () => {
+  const loadPlayers = useCallback(async () => {
     setLoading(true)
-
     try {
       const data = await getJson('/api/players')
-
       const rows = Array.isArray(data.players)
         ? data.players.map(normalizePlayer).filter((p) => p.name)
         : []
@@ -118,22 +72,32 @@ export default function Players() {
   }, [toast])
 
   useEffect(() => {
-    loadP()
-  }, [loadP])
+    loadPlayers()
+  }, [loadPlayers])
+
+  const filteredPlayers = useMemo(() => {
+    const q = query.trim().toLowerCase()
+
+    const filtered = players.filter((p) => {
+      if (statusFilter === 'valid' && !p.valid) return false
+      if (statusFilter === 'invalid' && p.valid) return false
+      if (!q) return true
+      return searchablePlayerText(p).includes(q)
+    })
+
+    return sortPlayers(filtered, sortBy)
+  }, [players, query, sortBy, statusFilter])
 
   async function act(action) {
-    if (!selected) return
+    if (!selected?.name) return
 
-    let cmd = ACTIONS[action] ? ACTIONS[action](selected) : `${action} ${selected}`
-
-    if (extra && (action === 'kick' || action === 'ban')) {
-      cmd += ` ${extra}`
-    }
+    let cmd = ACTIONS[action] ? ACTIONS[action](selected.name) : `${action} ${selected.name}`
+    if (extra && (action === 'kick' || action === 'ban')) cmd += ` ${extra}`
 
     try {
-      const d = await postJson('/api/command', { command: cmd })
-      toast(d.response || d.message || 'Command terkirim.', d.success ? 'success' : 'danger')
-      await loadP()
+      const data = await postJson('/api/command', { command: cmd })
+      toast(data.response || data.message || 'Command terkirim.', data.success ? 'success' : 'danger')
+      await loadPlayers()
     } catch (e) {
       toast(e.message, 'danger')
     }
@@ -141,119 +105,121 @@ export default function Players() {
 
   return (
     <>
-      <div className="card">
-        <div className="card-header d-flex justify-content-between align-items-center">
-          <span className="text-muted">
-            <i className="bi bi-people me-2" />
-            Online Players
-            <span className="badge bg-primary ms-2">{players.length}</span>
-          </span>
-
-          <button
-            className="btn btn-sm btn-outline-secondary px-2 py-1"
-            onClick={loadP}
-            disabled={loading}
-            title="Refresh players"
-          >
-            <i className={`bi ${loading ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'}`} />
+      <PageHeader
+        eyebrow="Players"
+        title="Online players"
+        description="Cari, urutkan, dan cek role pemain yang sedang online."
+        actions={(
+          <button className="btn btn-soft" onClick={loadPlayers} disabled={loading}>
+            {loading ? 'Loading...' : 'Refresh'}
           </button>
+        )}
+      />
+
+      <div className="panel-card">
+        <div className="table-toolbar">
+          <SearchBar
+            value={query}
+            onChange={setQuery}
+            placeholder="Cari player, role, world, koordinat..."
+            className="flex-grow-1"
+          />
+
+          <select className="form-select control-compact" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">Semua status</option>
+            <option value="valid">Valid</option>
+            <option value="invalid">Invalid</option>
+          </select>
+
+          <select className="form-select control-compact" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="name">Nama</option>
+            <option value="role">Role</option>
+            <option value="dimension">World</option>
+            <option value="health">Health</option>
+            <option value="level">Level</option>
+            <option value="status">Status</option>
+          </select>
         </div>
 
-        <div className="card-body p-0">
-          <div className="table-responsive">
-            <table className="table mb-0 align-middle">
-              <thead>
-                <tr>
-                  <th>Player Username</th>
-                  <th>Dimension</th>
-                  <th>Position</th>
-                  <th>Health</th>
-                  <th>Food</th>
-                  <th>Level</th>
-                  <th>Status</th>
-                  <th className="text-end">Management</th>
-                </tr>
-              </thead>
+        <div className="panel-subline">
+          <span>{filteredPlayers.length} dari {players.length} player</span>
+          {raw ? <span className="font-monospace text-truncate" title={raw}>RCON: {raw}</span> : null}
+        </div>
 
-              <tbody>
-                {players.length ? (
-                  players.map((p) => (
-                    <tr key={p.name}>
-                      <td className="fw-medium">
-                        <i className="bi bi-person-circle me-2 text-muted" />
-                        {p.name}
-                      </td>
+        <div className="table-responsive">
+          <table className="table modern-table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Role</th>
+                <th>World</th>
+                <th>Position</th>
+                <th>Health</th>
+                <th>Food</th>
+                <th>Level</th>
+                <th>Status</th>
+                <th className="text-end">Action</th>
+              </tr>
+            </thead>
 
-                      <td>
-                        <span className="badge bg-dark border border-secondary text-light fw-normal">
-                          {valueOrDash(p.dimension)}
-                        </span>
-                      </td>
-
-                      <td className="font-monospace small">
-                        {formatPosition(p.position)}
-                      </td>
-
-                      <td>{formatHealth(p.health)}</td>
-                      <td>{formatFood(p.food)}</td>
-                      <td>{valueOrDash(p.level)}</td>
-
-                      <td>
-                        {p.valid ? (
-                          <span className="badge bg-success-subtle text-success border border-success-subtle">
-                            Valid
-                          </span>
-                        ) : (
-                          <span className="badge bg-warning text-dark">
-                            Invalid
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="text-end">
-                        <button
-                          className="btn btn-sm btn-outline-secondary"
-                          onClick={() => {
-                            setSelected(p.name)
-                            setExtra('')
-                          }}
-                        >
-                          Kelola
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="8" className="text-center text-muted py-4 small">
-                      Tidak ada player online.
-                      {raw ? (
-                        <div className="font-monospace mt-2 opacity-75">{raw}</div>
-                      ) : null}
+            <tbody>
+              {filteredPlayers.length ? (
+                filteredPlayers.map((p) => (
+                  <tr key={p.name}>
+                    <td>
+                      <div className="player-cell">
+                        <div className="player-name">{p.name}</div>
+                        <div className="table-muted">{p.ping ? `${p.ping}ms` : 'online'}</div>
+                      </div>
+                    </td>
+                    <td><RoleBadge role={p.role} /></td>
+                    <td>{p.dimension || '-'}</td>
+                    <td className="font-monospace small">{formatPosition(p.position)}</td>
+                    <td>{formatHealth(p.health)}</td>
+                    <td>{formatFood(p.food)}</td>
+                    <td>{p.level ?? '-'}</td>
+                    <td>
+                      <span className={`state-pill ${p.valid ? 'ok' : 'warn'}`}>{p.valid ? 'Valid' : 'Invalid'}</span>
+                    </td>
+                    <td className="text-end">
+                      <button className="btn btn-sm btn-soft" onClick={() => { setSelected(p); setExtra('') }}>
+                        Kelola
+                      </button>
                     </td>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="9">
+                    <EmptyState
+                      title={players.length ? 'Tidak ada hasil cocok' : 'Tidak ada player online'}
+                      description={players.length ? 'Ubah kata kunci, filter, atau sort.' : 'Data muncul setelah /api/players mengembalikan player online.'}
+                    />
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
       <Modal
         open={!!selected}
-        onClose={() => setSelected('')}
-        title={
-          <span>
-            Kelola: <span className="text-primary">{selected}</span>
-          </span>
-        }
+        onClose={() => setSelected(null)}
+        title={selected ? <span>Kelola: <span className="text-primary">{selected.name}</span></span> : 'Kelola Player'}
         size="modal-panel-sm"
       >
         <div className="p-4">
-          <label className="form-label text-muted small fw-medium">
-            Reason / Extra Parameter (Opsional)
-          </label>
+          {selected ? (
+            <div className="selected-player-card mb-4">
+              <div>
+                <div className="fw-semibold text-light">{selected.name}</div>
+                <div className="text-muted small">{selected.role || 'Member'} · {selected.dimension || 'Unknown world'}</div>
+              </div>
+            </div>
+          ) : null}
 
+          <label className="form-label text-muted small fw-medium">Reason / Extra Parameter</label>
           <input
             className="form-control mb-4"
             value={extra}
@@ -261,59 +227,19 @@ export default function Players() {
             placeholder="Contoh: Spamming/Cheating"
           />
 
-          <div className="d-flex flex-wrap gap-2">
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => act('kick')}>
-              Kick
-            </button>
-
-            <button className="btn btn-sm btn-outline-secondary text-danger border-danger" onClick={() => act('ban')}>
-              Ban
-            </button>
-
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => act('pardon')}>
-              Pardon
-            </button>
-
-            <div className="w-100 my-1 border-bottom" style={{ borderColor: 'var(--border)' }} />
-
-            <button className="btn btn-sm btn-outline-primary" onClick={() => act('op')}>
-              Set OP
-            </button>
-
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => act('deop')}>
-              DeOP
-            </button>
-
-            <button className="btn btn-sm btn-outline-success" onClick={() => act('whitelist_add')}>
-              Whitelist (+)
-            </button>
-
-            <button className="btn btn-sm btn-outline-secondary text-danger" onClick={() => act('whitelist_remove')}>
-              Whitelist (-)
-            </button>
-
-            <div className="w-100 my-1 border-bottom" style={{ borderColor: 'var(--border)' }} />
-
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => act('gamemode_creative')}>
-              GMC
-            </button>
-
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => act('gamemode_survival')}>
-              GMS
-            </button>
-
-            <button className="btn btn-sm btn-outline-success" onClick={() => act('heal')}>
-              Heal
-            </button>
-
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => act('feed')}>
-              Feed
-            </button>
-
-            <button className="btn btn-sm btn-danger ms-auto" onClick={() => act('kill_player')}>
-              <i className="bi bi-skull me-1" />
-              Kill
-            </button>
+          <div className="action-grid">
+            <button className="btn btn-sm btn-soft" onClick={() => act('kick')}>Kick</button>
+            <button className="btn btn-sm btn-soft text-danger" onClick={() => act('ban')}>Ban</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('pardon')}>Pardon</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('op')}>Set OP</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('deop')}>DeOP</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('whitelist_add')}>Whitelist +</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('whitelist_remove')}>Whitelist -</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('gamemode_creative')}>GMC</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('gamemode_survival')}>GMS</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('heal')}>Heal</button>
+            <button className="btn btn-sm btn-soft" onClick={() => act('feed')}>Feed</button>
+            <button className="btn btn-sm btn-danger" onClick={() => act('kill_player')}>Kill</button>
           </div>
         </div>
       </Modal>

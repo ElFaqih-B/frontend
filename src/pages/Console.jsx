@@ -1,9 +1,55 @@
-import React from "react"
+import React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getJson, postJson, wsUrl } from '../api.js'
 import { COMMAND_SUGGESTIONS } from '../constants/commands.js'
 import { useToast } from '../contexts/ToastContext.jsx'
 import { classifyLog, normalizeLogEntry } from '../utils/logs.js'
+
+function renderLogLine(line, cls) {
+  const text = String(line || '')
+
+  // Vanilla/Paper chat, including prefixed chat:
+  // [12:00:00 INFO]: <Ken> hello
+  // [12:00:00 INFO]: [Member] <Ken> hello
+  const vanillaChat = text.match(/^(.*?)(<)([A-Za-z0-9_]{1,16})(>)(.*)$/)
+  if (vanillaChat) {
+    return (
+      <>
+        <span className="log-prefix">{vanillaChat[1]}{vanillaChat[2]}</span>
+        <span className="log-player">{vanillaChat[3]}</span>
+        <span className="log-prefix">{vanillaChat[4]}</span>
+        <span className="log-message">{vanillaChat[5]}</span>
+      </>
+    )
+  }
+
+  // DiscordSRV style: [DiscordSRV] Chat: Ken: hello
+  const discordChat = text.match(/^(.*?Chat:\s*)([A-Za-z0-9_]{1,16})(\s*[:»]\s*)(.*)$/i)
+  if (discordChat) {
+    return (
+      <>
+        <span className="log-prefix">{discordChat[1]}</span>
+        <span className="log-player discord">{discordChat[2]}</span>
+        <span className="log-prefix">{discordChat[3]}</span>
+        <span className="log-message">{discordChat[4]}</span>
+      </>
+    )
+  }
+
+  // Join/leave line: Ken joined the game
+  const joinLeave = text.match(/^(.*?:\s*)?([A-Za-z0-9_]{1,16})(\s+(?:joined|left) the game.*)$/i)
+  if (joinLeave && (cls === 'lj-in' || cls === 'lj-out')) {
+    return (
+      <>
+        <span className="log-prefix">{joinLeave[1] || ''}</span>
+        <span className="log-player event">{joinLeave[2]}</span>
+        <span className="log-message">{joinLeave[3]}</span>
+      </>
+    )
+  }
+
+  return text
+}
 
 export default function Console() {
   const toast = useToast()
@@ -35,10 +81,6 @@ export default function Console() {
   const addEntry = useCallback((entry) => {
     if (!entry) return
 
-    // Backend versi single-file mengirim wrapper seperti:
-    // { type: "log_line", entry: {...} }
-    // { type: "log_history", logs: [...] }
-    // { type: "log_clear" }
     if (entry.type === 'log_history') {
       setBacklog(entry.logs || [])
       return
@@ -65,12 +107,9 @@ export default function Console() {
 
     setLogs((old) => {
       const next = [...old, normalized].slice(-2000)
-
-      // Set ID dibatasi sesuai log yang masih tampil agar tidak tumbuh tanpa batas.
       if (next.length >= 2000) {
         seenRef.current = new Set(next.map((x) => x.id))
       }
-
       return next
     })
   }, [setBacklog])
@@ -103,10 +142,7 @@ export default function Console() {
 
         if (pingRef.current) clearInterval(pingRef.current)
         pingRef.current = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            // Backend boleh mengabaikan ping ini. Tujuannya menjaga koneksi tetap aktif.
-            socket.send('ping')
-          }
+          if (socket.readyState === WebSocket.OPEN) socket.send('ping')
         }, 20000)
       }
 
@@ -118,9 +154,7 @@ export default function Console() {
         }
       }
 
-      socket.onerror = () => {
-        setBadge(['error', 'bg-danger'])
-      }
+      socket.onerror = () => setBadge(['error', 'bg-danger'])
 
       socket.onclose = () => {
         if (pingRef.current) {
@@ -143,9 +177,7 @@ export default function Console() {
       if (pingRef.current) clearInterval(pingRef.current)
 
       const socket = socketRef.current
-      if (socket && socket.readyState <= WebSocket.OPEN) {
-        socket.close()
-      }
+      if (socket && socket.readyState <= WebSocket.OPEN) socket.close()
     }
   }, [addEntry])
 
@@ -203,7 +235,7 @@ export default function Console() {
   }
 
   function copyLog() {
-    navigator.clipboard.writeText(logs.map((x) => x.line).join('\n')).then(() => toast('Log disalin!'))
+    navigator.clipboard.writeText(logs.map((x) => x.line).join('\n')).then(() => toast('Log disalin.'))
   }
 
   function dlLog() {
@@ -242,23 +274,23 @@ export default function Console() {
   }
 
   return (
-    <div className="card border-0 shadow-sm" style={{ border: '1px solid var(--border)' }}>
-      <div className="card-header bg-transparent d-flex justify-content-between align-items-center border-bottom p-2 px-3">
-        <div className="nav nav-pills">
-          <button className={`nav-link tab-btn ${mode === 'all' ? 'active' : ''}`} onClick={() => setMode('all')}>
-            <i className="bi bi-terminal me-1" /> <span className="d-none d-sm-inline">All Logs</span>
+    <div className="panel-card console-panel">
+      <div className="console-head">
+        <div className="console-tabs">
+          <button className={`tab-btn ${mode === 'all' ? 'active' : ''}`} onClick={() => setMode('all')}>
+            All logs
           </button>
-          <button className={`nav-link tab-btn ms-2 ${mode === 'chat' ? 'active' : ''}`} onClick={() => setMode('chat')}>
-            <i className="bi bi-chat-dots me-1" /> <span className="d-none d-sm-inline">Chat Only</span>
+          <button className={`tab-btn ${mode === 'chat' ? 'active' : ''}`} onClick={() => setMode('chat')}>
+            Chat
           </button>
         </div>
 
         <span className={`badge ${badge[1]}`}>{badge[0]}</span>
       </div>
 
-      <div className="p-2 border-bottom d-flex flex-column flex-md-row gap-2 align-items-md-center justify-content-between" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-        <div className="input-group input-group-sm w-100" style={{ maxWidth: 300 }}>
-          <span className="input-group-text bg-transparent border-end-0 text-muted" style={{ borderColor: 'var(--border)' }}>
+      <div className="console-tools">
+        <div className="input-group input-group-sm console-search">
+          <span className="input-group-text border-end-0">
             <i className="bi bi-search" />
           </span>
           <input
@@ -269,17 +301,17 @@ export default function Console() {
           />
         </div>
 
-        <div className="d-flex gap-2 flex-wrap ms-md-auto w-100 w-md-auto justify-content-end">
-          <button className="btn btn-sm btn-outline-secondary flex-grow-1 flex-md-grow-0" onClick={() => setAutoScroll((x) => !x)} title="Auto Scroll">
-            <i className={`bi bi-arrow-down fs-6 ${autoScroll ? 'text-success' : 'text-muted'}`} />
+        <div className="d-flex gap-2 flex-wrap ms-md-auto justify-content-end">
+          <button className="btn btn-sm btn-outline-secondary" onClick={() => setAutoScroll((x) => !x)} title="Auto Scroll">
+            <i className={`bi bi-arrow-down ${autoScroll ? 'text-success' : 'text-muted'}`} />
           </button>
-          <button className="btn btn-sm btn-outline-secondary flex-grow-1 flex-md-grow-0" onClick={copyLog} title="Copy">
+          <button className="btn btn-sm btn-outline-secondary" onClick={copyLog} title="Copy">
             <i className="bi bi-clipboard" />
           </button>
-          <button className="btn btn-sm btn-outline-secondary flex-grow-1 flex-md-grow-0" onClick={dlLog} title="Download">
+          <button className="btn btn-sm btn-outline-secondary" onClick={dlLog} title="Download">
             <i className="bi bi-download" />
           </button>
-          <button className="btn btn-sm btn-outline-secondary text-danger flex-grow-1 flex-md-grow-0" onClick={clearLog} title="Clear">
+          <button className="btn btn-sm btn-outline-secondary text-danger" onClick={clearLog} title="Clear">
             <i className="bi bi-trash" />
           </button>
         </div>
@@ -288,10 +320,10 @@ export default function Console() {
       <div className="p-0 position-relative">
         <div id="con" ref={conRef}>
           {visibleLogs.map((l) => {
-            const [cls, , clean] = classifyLog(l.line)
+            const [cls, isChat, clean] = classifyLog(l.line)
             return (
-              <div key={l.id} className={`log-item ${cls}`}>
-                {clean}
+              <div key={l.id} className={`log-item ${cls} ${isChat ? 'is-chat' : ''}`}>
+                {renderLogLine(clean, cls)}
               </div>
             )
           })}
@@ -316,7 +348,7 @@ export default function Console() {
           )}
 
           <div className="d-flex align-items-center gap-2">
-            <span className="text-success fw-bold ms-1 mono">&gt;</span>
+            <span className="cmd-prompt">&gt;</span>
             <input
               ref={inputRef}
               className="form-control flex-grow-1 cmd-input"
@@ -328,7 +360,7 @@ export default function Console() {
               spellCheck="false"
             />
             <button className="btn btn-sm btn-outline-secondary border-0" onClick={sendCmd}>
-              <i className="bi bi-send text-muted" />
+              <i className="bi bi-send" />
             </button>
           </div>
         </div>

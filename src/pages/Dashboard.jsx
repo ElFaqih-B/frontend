@@ -1,95 +1,44 @@
-import React from "react"
-import { useCallback, useEffect, useState } from 'react'
+import React from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getJson, postJson } from '../api.js'
+import EmptyState from '../components/EmptyState.jsx'
+import StatCard from '../components/StatCard.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
+import { clampPct, num } from '../utils/format.js'
+import { formatPosition, normalizePlayer } from '../utils/players.js'
 
-function Metric({ title, value, suffix }) {
+function statusTone(status) {
+  if (status === 'ONLINE') return 'good'
+  if (status === 'STARTING') return 'warn'
+  return 'danger'
+}
+
+function RuntimeRow({ label, value, mono = false }) {
   return (
-    <div className="col-6 col-md-3">
-      <div className="card h-100 p-2">
-        <div className="card-body">
-          <div className="text-muted small fw-medium mb-1">{title}</div>
-          <div className="d-flex align-items-baseline gap-1">
-            <div className="fs-2 fw-semibold text-light">{value}</div>
-            <span className="text-muted">{suffix}</span>
-          </div>
-        </div>
-      </div>
+    <div className="runtime-row">
+      <span>{label}</span>
+      <strong className={mono ? 'font-monospace' : ''}>{value || '--'}</strong>
     </div>
   )
 }
 
-function InfoLine({ k, v, small, mono, last }) {
+function ActionButton({ label, tone = 'outline-secondary', onClick, disabled }) {
   return (
-    <div
-      className={`d-flex justify-content-between py-2 ${last ? '' : 'border-bottom'}`}
-      style={{ borderColor: 'var(--border)' }}
-    >
-      <span className="text-muted">{k}</span>
-      <span
-        className={`fw-medium text-end ${small ? 'small' : ''} ${mono ? 'font-monospace small' : ''}`}
-        style={{ maxWidth: '65%' }}
-      >
-        {v}
-      </span>
-    </div>
+    <button className={`btn btn-sm btn-${tone}`} onClick={onClick} disabled={disabled}>
+      {label}
+    </button>
   )
-}
-
-function normalizePlayer(player) {
-  if (typeof player === 'string') {
-    return {
-      name: player,
-      valid: true,
-      health: null,
-      food: null,
-      level: null,
-      dimension: null,
-      position: null,
-    }
-  }
-
-  if (player && typeof player === 'object') {
-    return {
-      name: player.name || player.username || 'Unknown',
-      valid: player.valid ?? true,
-      health: player.health ?? null,
-      food: player.food ?? null,
-      level: player.level ?? null,
-      dimension: player.dimension ?? null,
-      position: player.position ?? null,
-    }
-  }
-
-  return {
-    name: String(player || 'Unknown'),
-    valid: false,
-    health: null,
-    food: null,
-    level: null,
-    dimension: null,
-    position: null,
-  }
-}
-
-function formatPosition(position) {
-  if (!position || typeof position !== 'object') return ''
-
-  const x = position.x ?? '-'
-  const y = position.y ?? '-'
-  const z = position.z ?? '-'
-
-  return `${x}, ${y}, ${z}`
 }
 
 export default function Dashboard() {
   const toast = useToast()
-  const [d, setD] = useState(null)
+  const [status, setStatus] = useState(null)
   const [players, setPlayers] = useState([])
+  const [busy, setBusy] = useState('')
 
-  const fetchDash = useCallback(async () => {
+  const fetchStatus = useCallback(async () => {
     try {
-      setD(await getJson('/api/status'))
+      setStatus(await getJson('/api/status'))
     } catch (e) {
       toast(e.message, 'danger')
     }
@@ -101,7 +50,6 @@ export default function Dashboard() {
       const rows = Array.isArray(data.players)
         ? data.players.map(normalizePlayer).filter((p) => p.name)
         : []
-
       setPlayers(rows)
     } catch {
       setPlayers([])
@@ -109,148 +57,122 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    fetchDash()
+    fetchStatus()
     loadPlayers()
-
     const id = setInterval(() => {
-      fetchDash()
+      fetchStatus()
       loadPlayers()
     }, 5000)
-
     return () => clearInterval(id)
-  }, [fetchDash, loadPlayers])
+  }, [fetchStatus, loadPlayers])
 
-  async function srvAction(action) {
+  async function serverAction(action) {
+    if (action === 'kill' && !window.confirm('Kill paksa proses Java?')) return
+
+    setBusy(action)
     try {
-      const r = await postJson(`/api/${action}`)
-      toast(r.message || r.response || 'OK', r.success ? 'success' : 'danger')
-      setTimeout(fetchDash, 700)
+      const result = await postJson(`/api/${action}`)
+      toast(result.message || result.response || 'Command dikirim.', result.success ? 'success' : 'danger')
+      setTimeout(() => {
+        fetchStatus()
+        loadPlayers()
+      }, 800)
     } catch (e) {
       toast(e.message, 'danger')
+    } finally {
+      setBusy('')
     }
   }
 
-  const status = d?.status || 'Loading...'
-  const badge = status === 'ONLINE'
-    ? 'bg-success'
-    : status === 'STARTING'
-      ? 'bg-warning text-dark'
-      : 'bg-danger'
+  const serverStatus = status?.status || 'Loading...'
+  const tone = statusTone(serverStatus)
+  const endpoint = `${status?.server_ip || '--'}:${status?.server_port || '--'}`
+  const stateText = useMemo(() => {
+    const tps = Number(status?.tps)
+    const mspt = Number(status?.mspt)
+    if (!status || serverStatus !== 'ONLINE') return 'Server tidak sedang online.'
+    if (!Number.isNaN(tps) && tps < 18) return 'TPS sedang turun. Cek chunk generation atau plugin berat.'
+    if (!Number.isNaN(mspt) && mspt > 50) return 'MSPT melewati 50 ms. Server mulai terbebani.'
+    return 'Server online dan terbaca normal.'
+  }, [status, serverStatus])
 
   return (
-    <>
-      <div className="card mb-4 p-2">
-        <div className="card-body d-flex align-items-center justify-content-between flex-wrap gap-3">
+    <div className="dashboard-page">
+      <section className="status-strip">
+        <div className="status-strip-main">
+          <span className={`status-dot ${tone}`} />
           <div>
-            <span className="text-muted small text-uppercase fw-semibold" style={{ letterSpacing: '.5px' }}>
-              Server Status
-            </span>
-
-            <div className="d-flex align-items-center gap-2 mt-1">
-              <span className={`badge px-3 py-2 ${badge}`}>{status}</span>
-              <span className="text-muted small ms-2">
-                <i className="bi bi-clock-history me-1" /> {d?.uptime || '--'}
-              </span>
-            </div>
-          </div>
-
-          <div className="d-flex gap-2 flex-wrap">
-            <button className="btn btn-success" onClick={() => srvAction('start')}>
-              <i className="bi bi-play-fill" /> Start
-            </button>
-
-            <button className="btn btn-outline-secondary" onClick={() => srvAction('restart')}>
-              <i className="bi bi-arrow-clockwise" /> Restart
-            </button>
-
-            <button className="btn btn-outline-secondary" onClick={() => srvAction('stop')}>
-              <i className="bi bi-stop-fill" /> Stop
-            </button>
-
-            <button
-              className="btn btn-danger"
-              onClick={() => window.confirm('Kill paksa proses Java?') && srvAction('kill')}
-            >
-              <i className="bi bi-lightning-fill" /> Kill
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="row g-4 mb-4">
-        <Metric title="CPU Load" value={d?.cpu_pct ?? '--'} suffix="%" />
-        <Metric title="System RAM" value={d?.ram_pct ?? '--'} suffix="%" />
-        <Metric title="Java Heap" value={d?.java_ram ?? '--'} suffix="MB" />
-        <Metric title="Performance" value={d?.tps ?? '--'} suffix={`MSPT ${d?.mspt ?? '--'}`} />
-      </div>
-
-      <div className="row g-4 mb-4">
-        <div className="col-md-6">
-          <div className="card h-100">
-            <div className="card-header border-0 pb-0 pt-4 px-4">
-              <i className="bi bi-hdd-network me-2 text-muted" /> System Info
-            </div>
-
-            <div className="card-body px-4">
-              <InfoLine k="Minecraft" v={d?.mc_ver || '--'} />
-              <InfoLine k="Software" v={d?.paper_ver || '--'} />
-              <InfoLine k="Java Version" v={d?.java_ver || '--'} small />
-              <InfoLine k="Storage" v={d?.disk_used || '--'} />
-              <InfoLine k="Endpoint" v={`${d?.server_ip || '--'}:${d?.server_port || '--'}`} mono last />
-            </div>
+            <div className="status-strip-title">{serverStatus}</div>
+            <div className="status-strip-subtitle">{stateText}</div>
           </div>
         </div>
 
-        <div className="col-md-6">
-          <div className="card h-100">
-            <div className="card-header border-0 pb-0 pt-4 px-4 d-flex justify-content-between align-items-center">
-              <span>
-                <i className="bi bi-people me-2 text-muted" /> Players ({players.length})
-              </span>
+        <div className="status-actions">
+          <ActionButton label="Start" tone="success" onClick={() => serverAction('start')} disabled={!!busy} />
+          <ActionButton label="Restart" onClick={() => serverAction('restart')} disabled={!!busy} />
+          <ActionButton label="Stop" onClick={() => serverAction('stop')} disabled={!!busy} />
+          <ActionButton label="Kill" tone="danger" onClick={() => serverAction('kill')} disabled={!!busy} />
+        </div>
+      </section>
 
-              <button className="btn btn-sm btn-outline-secondary py-1" onClick={loadPlayers}>
-                <i className="bi bi-arrow-clockwise" />
-              </button>
-            </div>
+      <div className="stat-grid mt-3">
+        <StatCard label="CPU" value={num(status?.cpu_pct)} suffix="%" tone={Number(status?.cpu_pct) > 80 ? 'danger' : 'neutral'} progress={clampPct(status?.cpu_pct)} />
+        <StatCard label="RAM" value={num(status?.ram_pct)} suffix="%" tone={Number(status?.ram_pct) > 85 ? 'danger' : 'neutral'} progress={clampPct(status?.ram_pct)} />
+        <StatCard label="Java" value={num(status?.java_ram)} suffix="MB" hint="Heap" />
+        <StatCard label="TPS" value={status?.tps || '--'} suffix="" hint={`MSPT ${status?.mspt || '--'}`} tone={Number(status?.tps) < 18 ? 'warn' : 'good'} />
+      </div>
 
-            <div className="card-body px-4 pt-3">
-              <div className="d-flex flex-wrap gap-2">
-                {players.length ? (
-                  players.map((p) => (
-                    <span
-                      key={p.name}
-                      className="badge bg-success-subtle text-success border border-success-subtle d-inline-flex align-items-center gap-1"
-                      title={[
-                        p.dimension ? `World: ${p.dimension}` : '',
-                        p.health !== null ? `Health: ${p.health}` : '',
-                        p.level !== null ? `Level: ${p.level}` : '',
-                      ].filter(Boolean).join(' | ')}
-                    >
-                      <i className="bi bi-person" />
-                      {p.name}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-muted small">Tidak ada player online.</span>
-                )}
+      <div className="row g-3 mt-1">
+        <div className="col-lg-7">
+          <div className="panel-card h-100">
+            <div className="panel-head compact">
+              <div>
+                <h3>Runtime</h3>
+                <p>Informasi server yang sedang dibaca backend.</p>
               </div>
-
-              {players.length ? (
-                <div className="mt-3 d-flex flex-column gap-2">
-                  {players.map((p) => (
-                    <div key={`${p.name}-detail`} className="small text-muted d-flex justify-content-between gap-3">
-                      <span className="text-light">{p.name}</span>
-                      <span className="font-monospace text-end">
-                        {p.dimension || '-'} {p.position ? `@ ${formatPosition(p.position)}` : ''}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+            </div>
+            <div className="runtime-grid">
+              <RuntimeRow label="Minecraft" value={status?.mc_ver} />
+              <RuntimeRow label="Software" value={status?.paper_ver} />
+              <RuntimeRow label="Java" value={status?.java_ver} />
+              <RuntimeRow label="Disk" value={status?.disk_used} />
+              <RuntimeRow label="Endpoint" value={endpoint} mono />
+              <RuntimeRow label="Uptime" value={status?.uptime} />
             </div>
           </div>
         </div>
+
+        <div className="col-lg-5">
+          <div className="panel-card h-100">
+            <div className="panel-head compact">
+              <div>
+                <h3>Players</h3>
+                <p>{players.length} online</p>
+              </div>
+              <button className="btn btn-sm btn-soft" onClick={loadPlayers}>Refresh</button>
+            </div>
+
+            {players.length ? (
+              <div className="player-stack dense">
+                {players.map((p) => (
+                  <div className="player-mini" key={p.name}>
+                    <div className="d-flex align-items-center justify-content-between gap-2">
+                      <div className="player-mini-name">{p.name}</div>
+                      <span className="role-chip">{p.role || 'Member'}</span>
+                    </div>
+                    <div className="player-mini-meta">
+                      <span>{p.dimension || '-'}</span>
+                      <span className="font-monospace">{formatPosition(p.position)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Tidak ada player online" description="Player muncul setelah /api/players berhasil terbaca." />
+            )}
+          </div>
+        </div>
       </div>
-    </>
+    </div>
   )
 }

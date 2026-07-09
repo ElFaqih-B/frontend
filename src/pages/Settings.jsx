@@ -1,37 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiUrl, getJson, postForm, postJson } from '../api.js'
+import EmptyState from '../components/EmptyState.jsx'
+import PageHeader from '../components/PageHeader.jsx'
+import SearchBar from '../components/SearchBar.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-
-const COLOR_CODES = [
-  ['§0', 'Black'],
-  ['§1', 'Dark Blue'],
-  ['§2', 'Dark Green'],
-  ['§3', 'Dark Aqua'],
-  ['§4', 'Dark Red'],
-  ['§5', 'Dark Purple'],
-  ['§6', 'Gold'],
-  ['§7', 'Gray'],
-  ['§8', 'Dark Gray'],
-  ['§9', 'Blue'],
-  ['§a', 'Green'],
-  ['§b', 'Aqua'],
-  ['§c', 'Red'],
-  ['§d', 'Pink'],
-  ['§e', 'Yellow'],
-  ['§f', 'White'],
-]
-
-const FORMAT_CODES = [
-  ['§l', 'Bold'],
-  ['§o', 'Italic'],
-  ['§n', 'Underline'],
-  ['§m', 'Strike'],
-  ['§r', 'Reset'],
-]
 
 const IMPORTANT_KEYS = [
   'motd',
   'max-players',
+  'server-port',
   'online-mode',
   'white-list',
   'difficulty',
@@ -44,133 +22,169 @@ const IMPORTANT_KEYS = [
   'rcon.port',
 ]
 
-const COLOR_CLASS = {
-  '§0': '#000000',
-  '§1': '#0000AA',
-  '§2': '#00AA00',
-  '§3': '#00AAAA',
-  '§4': '#AA0000',
-  '§5': '#AA00AA',
-  '§6': '#FFAA00',
-  '§7': '#AAAAAA',
-  '§8': '#555555',
-  '§9': '#5555FF',
-  '§a': '#55FF55',
-  '§b': '#55FFFF',
-  '§c': '#FF5555',
-  '§d': '#FF55FF',
-  '§e': '#FFFF55',
-  '§f': '#FFFFFF',
+const COLOR_CODES = [
+  ['§0', 'Black', '#000000'],
+  ['§1', 'Dark Blue', '#0000AA'],
+  ['§2', 'Dark Green', '#00AA00'],
+  ['§3', 'Dark Aqua', '#00AAAA'],
+  ['§4', 'Dark Red', '#AA0000'],
+  ['§5', 'Dark Purple', '#AA00AA'],
+  ['§6', 'Gold', '#FFAA00'],
+  ['§7', 'Gray', '#AAAAAA'],
+  ['§8', 'Dark Gray', '#555555'],
+  ['§9', 'Blue', '#5555FF'],
+  ['§a', 'Green', '#55FF55'],
+  ['§b', 'Aqua', '#55FFFF'],
+  ['§c', 'Red', '#FF5555'],
+  ['§d', 'Pink', '#FF55FF'],
+  ['§e', 'Yellow', '#FFFF55'],
+  ['§f', 'White', '#FFFFFF'],
+]
+
+const FORMAT_CODES = [
+  ['§l', 'Bold'],
+  ['§o', 'Italic'],
+  ['§n', 'Underline'],
+  ['§m', 'Strike'],
+  ['§r', 'Reset'],
+]
+
+const COLOR_MAP = Object.fromEntries(COLOR_CODES.map(([code, , color]) => [code, color]))
+
+function labelForKey(key) {
+  const labels = {
+    motd: 'Message of the Day',
+    'max-players': 'Max Players',
+    'server-port': 'Server Port',
+    'online-mode': 'Online Mode',
+    'white-list': 'Whitelist',
+    difficulty: 'Difficulty',
+    gamemode: 'Default Gamemode',
+    pvp: 'PvP',
+    'view-distance': 'View Distance',
+    'simulation-distance': 'Simulation Distance',
+    'spawn-protection': 'Spawn Protection',
+    'enable-rcon': 'Enable RCON',
+    'rcon.port': 'RCON Port',
+  }
+
+  return labels[key] || key
+}
+
+function selectOptions(key) {
+  const map = {
+    difficulty: ['peaceful', 'easy', 'normal', 'hard'],
+    gamemode: ['survival', 'creative', 'adventure', 'spectator'],
+    pvp: ['true', 'false'],
+    'online-mode': ['true', 'false'],
+    'white-list': ['true', 'false'],
+    'enable-rcon': ['true', 'false'],
+  }
+  return map[key] || null
 }
 
 function renderMotd(text) {
   const lines = String(text || '').split('\n')
-  let currentStyle = { color: '#FFFFFF' }
-  let bold = false
-  let italic = false
-  let underline = false
-  let strike = false
-
-  function styleObj() {
-    return {
-      color: currentStyle.color,
-      fontWeight: bold ? 700 : 400,
-      fontStyle: italic ? 'italic' : 'normal',
-      textDecoration: [
-        underline ? 'underline' : '',
-        strike ? 'line-through' : '',
-      ].filter(Boolean).join(' '),
-    }
-  }
+  let style = { color: '#e5e7eb', fontWeight: 400, fontStyle: 'normal', textDecoration: 'none' }
 
   return lines.map((line, lineIndex) => {
     const parts = []
     let buffer = ''
 
+    function flush(i) {
+      if (!buffer) return
+      parts.push(<span key={`${lineIndex}-${i}-${parts.length}`} style={style}>{buffer}</span>)
+      buffer = ''
+    }
+
     for (let i = 0; i < line.length; i += 1) {
-      const ch = line[i]
-
-      if (ch === '§' && i + 1 < line.length) {
-        if (buffer) {
-          parts.push(
-            <span key={`${lineIndex}-${i}-${parts.length}`} style={styleObj()}>
-              {buffer}
-            </span>
-          )
-          buffer = ''
-        }
-
+      if (line[i] === '§' && i + 1 < line.length) {
+        flush(i)
         const code = `§${line[i + 1].toLowerCase()}`
 
-        if (COLOR_CLASS[code]) {
-          currentStyle = { color: COLOR_CLASS[code] }
-        } else if (code === '§l') {
-          bold = true
-        } else if (code === '§o') {
-          italic = true
-        } else if (code === '§n') {
-          underline = true
-        } else if (code === '§m') {
-          strike = true
-        } else if (code === '§r') {
-          currentStyle = { color: '#FFFFFF' }
-          bold = false
-          italic = false
-          underline = false
-          strike = false
-        }
+        if (COLOR_MAP[code]) style = { ...style, color: COLOR_MAP[code] }
+        if (code === '§l') style = { ...style, fontWeight: 700 }
+        if (code === '§o') style = { ...style, fontStyle: 'italic' }
+        if (code === '§n') style = { ...style, textDecoration: 'underline' }
+        if (code === '§m') style = { ...style, textDecoration: 'line-through' }
+        if (code === '§r') style = { color: '#e5e7eb', fontWeight: 400, fontStyle: 'normal', textDecoration: 'none' }
 
         i += 1
       } else {
-        buffer += ch
+        buffer += line[i]
       }
     }
 
-    if (buffer) {
-      parts.push(
-        <span key={`${lineIndex}-end`} style={styleObj()}>
-          {buffer}
-        </span>
-      )
-    }
-
-    return (
-      <div key={lineIndex}>
-        {parts.length ? parts : <span>&nbsp;</span>}
-      </div>
-    )
+    flush('end')
+    return <div key={lineIndex}>{parts.length ? parts : <span>&nbsp;</span>}</div>
   })
+}
+
+function PropertyField({ name, value, onChange }) {
+  const options = selectOptions(name)
+
+  return (
+    <div className="property-row">
+      <div className="property-meta">
+        <div className="property-title">{labelForKey(name)}</div>
+        <div className="property-key font-monospace">{name}</div>
+      </div>
+
+      <div className="property-input-wrap">
+        {options ? (
+          <select className="form-select" value={value ?? ''} onChange={(e) => onChange(name, e.target.value)}>
+            {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        ) : (
+          <input
+            className="form-control font-monospace"
+            value={value ?? ''}
+            onChange={(e) => onChange(name, e.target.value)}
+            placeholder={`value untuk ${name}`}
+            disabled={name === 'motd'}
+          />
+        )}
+      </div>
+    </div>
+  )
 }
 
 export default function Settings() {
   const toast = useToast()
   const motdRef = useRef(null)
-
-  const [properties, setProperties] = useState({})
+  const [props, setProps] = useState({})
   const [motd, setMotd] = useState('')
   const [iconFile, setIconFile] = useState(null)
   const [iconPreview, setIconPreview] = useState('')
-  const [loading, setLoading] = useState(false)
   const [serverDir, setServerDir] = useState('')
+  const [query, setQuery] = useState('')
+  const [mode, setMode] = useState('important')
+  const [loading, setLoading] = useState(false)
 
-  const loadSettings = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true)
-
     try {
-      const [propsData, brandingData] = await Promise.all([
-        getJson('/api/settings/properties'),
-        getJson('/api/settings/branding'),
-      ])
+      let properties = {}
+      let branding = null
 
-      setProperties(propsData.properties || {})
-      setMotd(brandingData.motd || '')
-      setServerDir(brandingData.server_dir || '')
-
-      if (brandingData.icon_url) {
-        setIconPreview(apiUrl(brandingData.icon_url))
-      } else {
-        setIconPreview('')
+      try {
+        const data = await getJson('/api/settings/properties')
+        properties = data.properties || {}
+      } catch {
+        const data = await getJson('/api/settings')
+        properties = data.props || {}
       }
+
+      try {
+        branding = await getJson('/api/settings/branding')
+      } catch {
+        branding = null
+      }
+
+      setProps(properties)
+      setMotd((branding?.motd || properties.motd || '').replace(/\\n/g, '\n'))
+      setServerDir(branding?.server_dir || '')
+      setIconPreview(branding?.icon_url ? apiUrl(branding.icon_url) : '')
     } catch (e) {
       toast(e.message, 'danger')
     } finally {
@@ -179,12 +193,15 @@ export default function Settings() {
   }, [toast])
 
   useEffect(() => {
-    loadSettings()
-  }, [loadSettings])
+    load()
+  }, [load])
 
-  function insertMotdCode(code) {
+  function setVal(key, value) {
+    setProps((old) => ({ ...old, [key]: value }))
+  }
+
+  function insertMotd(code) {
     const el = motdRef.current
-
     if (!el) {
       setMotd((old) => `${old}${code}`)
       return
@@ -193,7 +210,6 @@ export default function Settings() {
     const start = el.selectionStart
     const end = el.selectionEnd
     const next = `${motd.slice(0, start)}${code}${motd.slice(end)}`
-
     setMotd(next)
 
     requestAnimationFrame(() => {
@@ -202,30 +218,25 @@ export default function Settings() {
     })
   }
 
-  function updateProp(key, value) {
-    setProperties((old) => ({
-      ...old,
-      [key]: value,
-    }))
-
-    if (key === 'motd') {
-      setMotd(value.replace(/\\n/g, '\n'))
-    }
+  function onPickIcon(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIconFile(file)
+    setIconPreview(URL.createObjectURL(file))
   }
 
   async function saveProperties() {
+    const payload = { ...props, motd: motd.replace(/\n/g, '\\n') }
+
     try {
-      const payload = {
-        ...properties,
-        motd: motd.replace(/\n/g, '\\n'),
+      let data
+      try {
+        data = await postJson('/api/settings/properties', { properties: payload })
+      } catch {
+        data = await postJson('/api/settings/save', payload)
       }
-
-      const data = await postJson('/api/settings/properties', {
-        properties: payload,
-      })
-
-      toast(data.message || 'Settings berhasil disimpan.', data.success ? 'success' : 'danger')
-      await loadSettings()
+      toast(data.message || 'server.properties berhasil disimpan.', data.success !== false ? 'success' : 'danger')
+      await load()
     } catch (e) {
       toast(e.message, 'danger')
     }
@@ -235,241 +246,154 @@ export default function Settings() {
     try {
       const form = new FormData()
       form.append('motd', motd)
+      if (iconFile) form.append('icon', iconFile)
 
-      if (iconFile) {
-        form.append('icon', iconFile)
+      try {
+        const data = await postForm('/api/settings/branding', form)
+        toast(data.message || 'Branding berhasil disimpan.', data.success !== false ? 'success' : 'danger')
+      } catch {
+        await saveProperties()
+        toast('MOTD disimpan. Endpoint upload icon tidak tersedia di backend ini.', 'warning')
       }
 
-      const data = await postForm('/api/settings/branding', form)
-
-      toast(data.message || 'Branding berhasil disimpan.', data.success ? 'success' : 'danger')
       setIconFile(null)
-      await loadSettings()
+      await load()
     } catch (e) {
       toast(e.message, 'danger')
     }
   }
 
-  function onPickIcon(e) {
-    const file = e.target.files?.[0]
+  const propertyEntries = useMemo(() => {
+    let entries = Object.entries(props)
 
-    if (!file) return
+    if (mode === 'important') {
+      const set = new Set(IMPORTANT_KEYS)
+      entries = entries.filter(([key]) => set.has(key))
+    }
 
-    setIconFile(file)
-    setIconPreview(URL.createObjectURL(file))
-  }
+    const q = query.trim().toLowerCase()
+    if (q) {
+      entries = entries.filter(([key, value]) => `${key} ${labelForKey(key)} ${value}`.toLowerCase().includes(q))
+    }
+
+    entries.sort(([a], [b]) => {
+      const ai = IMPORTANT_KEYS.indexOf(a)
+      const bi = IMPORTANT_KEYS.indexOf(b)
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
+      return a.localeCompare(b)
+    })
+
+    return entries
+  }, [props, query, mode])
 
   return (
-    <div className="row g-4">
-      <div className="col-lg-7">
-        <div className="card h-100">
-          <div className="card-header d-flex justify-content-between align-items-center">
-            <span>
-              <i className="bi bi-palette me-2 text-muted" />
-              Server Branding
-            </span>
-
-            <button className="btn btn-sm btn-outline-secondary" onClick={loadSettings} disabled={loading}>
-              <i className={`bi ${loading ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'}`} />
-            </button>
+    <>
+      <PageHeader
+        eyebrow="Settings"
+        title="Server settings"
+        description="Branding dan konfigurasi server.properties dari panel web."
+        actions={(
+          <div className="d-flex gap-2 flex-wrap">
+            <button className="btn btn-soft" onClick={load} disabled={loading}>{loading ? 'Loading...' : 'Refresh'}</button>
+            <button className="btn btn-primary" onClick={saveProperties}>Save properties</button>
           </div>
+        )}
+      />
 
-          <div className="card-body">
-            <div className="mb-4">
-              <label className="form-label text-muted small fw-medium">Server Icon</label>
+      <div className="row g-4">
+        <div className="col-xl-5">
+          <div className="panel-card h-100">
+            <div className="panel-head">
+              <div>
+                <h3>Branding</h3>
+                <p>Server icon dan MOTD untuk server list Minecraft.</p>
+              </div>
+            </div>
 
-              <div className="d-flex align-items-center gap-3 flex-wrap">
-                <div
-                  className="border rounded d-flex align-items-center justify-content-center"
-                  style={{
-                    width: 76,
-                    height: 76,
-                    borderColor: 'var(--border)',
-                    background: 'rgba(255,255,255,.03)',
-                  }}
-                >
-                  {iconPreview ? (
-                    <img
-                      src={iconPreview}
-                      alt="server-icon"
-                      width="64"
-                      height="64"
-                      style={{ imageRendering: 'pixelated' }}
-                    />
-                  ) : (
-                    <i className="bi bi-image text-muted fs-2" />
-                  )}
-                </div>
-
-                <div className="flex-grow-1">
-                  <input
-                    className="form-control"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    onChange={onPickIcon}
-                  />
-
-                  <div className="form-text text-muted">
-                    Upload gambar apa saja, backend otomatis resize ke <code>server-icon.png</code> 64x64.
-                  </div>
+            <div className="branding-preview mb-4">
+              <div className="server-icon-preview">
+                {iconPreview ? <img src={iconPreview} alt="server-icon" /> : <span>64</span>}
+              </div>
+              <div className="min-w-0">
+                <div className="fw-semibold text-light mb-1">Atomic PooPerS</div>
+                <div className="motd-preview font-monospace">
+                  {renderMotd(motd || '§7A Minecraft Server')}
                 </div>
               </div>
             </div>
 
-            <div className="mb-3">
-              <label className="form-label text-muted small fw-medium">MOTD / Server List Text</label>
+            <label className="form-label text-muted small fw-medium">Server icon</label>
+            <input className="form-control mb-3" type="file" accept="image/png,image/jpeg,image/webp" onChange={onPickIcon} />
 
-              <textarea
-                ref={motdRef}
-                className="form-control font-monospace"
-                rows="4"
-                value={motd}
-                onChange={(e) => setMotd(e.target.value)}
-                placeholder="§b§lFAQIH SMP §8» §fSurvival Private&#10;§7No Grief • Skills • Furniture"
-              />
-            </div>
+            <label className="form-label text-muted small fw-medium">MOTD</label>
+            <textarea
+              ref={motdRef}
+              className="form-control font-monospace mb-3"
+              rows="4"
+              value={motd}
+              onChange={(e) => setMotd(e.target.value)}
+              placeholder="§b§lAtomic PooPerS §8» §fSurvival Private"
+            />
 
-            <div className="mb-3">
-              <div className="text-muted small fw-medium mb-2">Color</div>
-
-              <div className="d-flex flex-wrap gap-2">
-                {COLOR_CODES.map(([code, label]) => (
-                  <button
-                    key={code}
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary"
-                    onClick={() => insertMotdCode(code)}
-                    title={label}
-                  >
-                    <span style={{ color: COLOR_CLASS[code] }}>■</span> {code}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mb-4">
-              <div className="text-muted small fw-medium mb-2">Format</div>
-
-              <div className="d-flex flex-wrap gap-2">
-                {FORMAT_CODES.map(([code, label]) => (
-                  <button
-                    key={code}
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary"
-                    onClick={() => insertMotdCode(code)}
-                  >
-                    {label} <span className="font-monospace">{code}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <button className="btn btn-primary" onClick={saveBranding}>
-              <i className="bi bi-save me-1" />
-              Simpan Branding
-            </button>
-
-            <div className="alert alert-warning mt-3 mb-0 small">
-              Setelah simpan icon/MOTD, restart server Minecraft agar server list client berubah.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="col-lg-5">
-        <div className="card mb-4">
-          <div className="card-header">
-            <i className="bi bi-eye me-2 text-muted" />
-            Preview Server List
-          </div>
-
-          <div className="card-body">
-            <div
-              className="border rounded p-3"
-              style={{
-                borderColor: 'var(--border)',
-                background: 'linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02))',
-              }}
-            >
-              <div className="d-flex gap-3 align-items-center">
-                <div
-                  className="border rounded d-flex align-items-center justify-content-center flex-shrink-0"
-                  style={{
-                    width: 72,
-                    height: 72,
-                    borderColor: 'var(--border)',
-                    background: 'rgba(0,0,0,.25)',
-                  }}
-                >
-                  {iconPreview ? (
-                    <img
-                      src={iconPreview}
-                      alt="preview"
-                      width="64"
-                      height="64"
-                      style={{ imageRendering: 'pixelated' }}
-                    />
-                  ) : (
-                    <i className="bi bi-image text-muted fs-2" />
-                  )}
-                </div>
-
-                <div className="min-w-0">
-                  <div className="text-light fw-semibold mb-1">Minecraft Server</div>
-
-                  <div className="font-monospace small" style={{ lineHeight: 1.35 }}>
-                    {renderMotd(motd || '§7A Minecraft Server')}
-                  </div>
-
-                  <div className="text-muted small mt-2">
-                    {serverDir || 'Server directory belum terbaca'}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3 small text-muted">
-              Preview ini simulasi web. Tampilan final di Minecraft client bisa sedikit berbeda.
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header">
-            <i className="bi bi-sliders me-2 text-muted" />
-            Quick Server Properties
-          </div>
-
-          <div className="card-body">
-            <div className="d-flex flex-column gap-3">
-              {IMPORTANT_KEYS.map((key) => (
-                <div key={key}>
-                  <label className="form-label text-muted small fw-medium">{key}</label>
-
-                  <input
-                    className="form-control font-monospace"
-                    value={properties[key] ?? ''}
-                    onChange={(e) => updateProp(key, e.target.value)}
-                    placeholder={`value untuk ${key}`}
-                    disabled={key === 'motd'}
-                  />
-
-                  {key === 'motd' ? (
-                    <div className="form-text text-muted">
-                      MOTD diatur dari panel Server Branding di kiri.
-                    </div>
-                  ) : null}
-                </div>
+            <div className="color-grid mb-3">
+              {COLOR_CODES.map(([code, label, color]) => (
+                <button key={code} type="button" className="btn btn-sm btn-soft" onClick={() => insertMotd(code)} title={label}>
+                  <span style={{ color }}>■</span> {code}
+                </button>
               ))}
             </div>
 
-            <button className="btn btn-outline-primary mt-4" onClick={saveProperties}>
-              <i className="bi bi-save me-1" />
-              Simpan Properties
-            </button>
+            <div className="d-flex flex-wrap gap-2 mb-4">
+              {FORMAT_CODES.map(([code, label]) => (
+                <button key={code} type="button" className="btn btn-sm btn-soft" onClick={() => insertMotd(code)}>
+                  {label} <span className="font-monospace">{code}</span>
+                </button>
+              ))}
+            </div>
+
+            <button className="btn btn-primary w-100" onClick={saveBranding}>Save branding</button>
+
+            <div className="helper-note mt-3">
+              Restart server Minecraft diperlukan agar icon/MOTD terlihat di client.
+              {serverDir ? <div className="font-monospace mt-2">{serverDir}</div> : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="col-xl-7">
+          <div className="panel-card h-100">
+            <div className="panel-head align-items-start">
+              <div>
+                <h3>server.properties</h3>
+                <p>Search khusus key/value konfigurasi server.</p>
+              </div>
+              <div className="segmented">
+                <button className={mode === 'important' ? 'active' : ''} onClick={() => setMode('important')}>Important</button>
+                <button className={mode === 'all' ? 'active' : ''} onClick={() => setMode('all')}>All</button>
+              </div>
+            </div>
+
+            <div className="table-toolbar px-0 pt-0">
+              <SearchBar
+                value={query}
+                onChange={setQuery}
+                placeholder="Cari: rcon, whitelist, distance, pvp..."
+                className="flex-grow-1"
+              />
+            </div>
+
+            <div className="settings-list">
+              {propertyEntries.length ? (
+                propertyEntries.map(([key, value]) => (
+                  <PropertyField key={key} name={key} value={key === 'motd' ? motd : value} onChange={setVal} />
+                ))
+              ) : (
+                <EmptyState title="Tidak ada property cocok" description="Ubah kata kunci atau pindah mode ke All." />
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
