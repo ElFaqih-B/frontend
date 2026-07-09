@@ -1,7 +1,4 @@
-cd ~/Documents/game/dashboard/frontend
-
-cat > README.md <<'EOF'
-# craft.panel — Minecraft Server Dashboard Frontend
+# Local Minecraft Server Dashboard Frontend
 
 Frontend dashboard untuk mengontrol server Minecraft Paper lokal melalui backend FastAPI. Frontend ini dibuat dengan React + Vite dan dideploy ke Vercel, sementara backend tetap berjalan secara lokal dan diakses melalui Cloudflare Tunnel.
 
