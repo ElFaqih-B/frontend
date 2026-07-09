@@ -13,6 +13,34 @@ function statusTone(status) {
   return 'danger'
 }
 
+function getRole(player) {
+  const raw = String(
+    player?.role ||
+      player?.rank ||
+      player?.group ||
+      player?.primary_group ||
+      player?.permission_group ||
+      ''
+  ).toLowerCase()
+
+  if (player?.is_op || player?.op || player?.operator) return 'Owner'
+
+  if (
+    raw.includes('owner') ||
+    raw.includes('admin') ||
+    raw.includes('operator') ||
+    raw === 'op'
+  ) {
+    return 'Owner'
+  }
+
+  return 'Member'
+}
+
+function roleClass(player) {
+  return getRole(player) === 'Owner' ? 'role-owner' : 'role-member'
+}
+
 function RuntimeRow({ label, value, mono = false }) {
   return (
     <div className="runtime-row">
@@ -47,9 +75,17 @@ export default function Dashboard() {
   const loadPlayers = useCallback(async () => {
     try {
       const data = await getJson('/api/players')
-      const rows = Array.isArray(data.players)
-        ? data.players.map(normalizePlayer).filter((p) => p.name)
-        : []
+
+      const source = Array.isArray(data.players)
+        ? data.players
+        : Array.isArray(data.names)
+          ? data.names
+          : []
+
+      const rows = source
+        .map(normalizePlayer)
+        .filter((p) => p.name)
+
       setPlayers(rows)
     } catch {
       setPlayers([])
@@ -59,10 +95,12 @@ export default function Dashboard() {
   useEffect(() => {
     fetchStatus()
     loadPlayers()
+
     const id = setInterval(() => {
       fetchStatus()
       loadPlayers()
     }, 5000)
+
     return () => clearInterval(id)
   }, [fetchStatus, loadPlayers])
 
@@ -70,9 +108,11 @@ export default function Dashboard() {
     if (action === 'kill' && !window.confirm('Kill paksa proses Java?')) return
 
     setBusy(action)
+
     try {
       const result = await postJson(`/api/${action}`)
       toast(result.message || result.response || 'Command dikirim.', result.success ? 'success' : 'danger')
+
       setTimeout(() => {
         fetchStatus()
         loadPlayers()
@@ -87,12 +127,15 @@ export default function Dashboard() {
   const serverStatus = status?.status || 'Loading...'
   const tone = statusTone(serverStatus)
   const endpoint = `${status?.server_ip || '--'}:${status?.server_port || '--'}`
+
   const stateText = useMemo(() => {
     const tps = Number(status?.tps)
     const mspt = Number(status?.mspt)
+
     if (!status || serverStatus !== 'ONLINE') return 'Server tidak sedang online.'
     if (!Number.isNaN(tps) && tps < 18) return 'TPS sedang turun. Cek chunk generation atau plugin berat.'
     if (!Number.isNaN(mspt) && mspt > 50) return 'MSPT melewati 50 ms. Server mulai terbebani.'
+
     return 'Server online dan terbaca normal.'
   }, [status, serverStatus])
 
@@ -116,10 +159,36 @@ export default function Dashboard() {
       </section>
 
       <div className="stat-grid mt-3">
-        <StatCard label="CPU" value={num(status?.cpu_pct)} suffix="%" tone={Number(status?.cpu_pct) > 80 ? 'danger' : 'neutral'} progress={clampPct(status?.cpu_pct)} />
-        <StatCard label="RAM" value={num(status?.ram_pct)} suffix="%" tone={Number(status?.ram_pct) > 85 ? 'danger' : 'neutral'} progress={clampPct(status?.ram_pct)} />
-        <StatCard label="Java" value={num(status?.java_ram)} suffix="MB" hint="Heap" />
-        <StatCard label="TPS" value={status?.tps || '--'} suffix="" hint={`MSPT ${status?.mspt || '--'}`} tone={Number(status?.tps) < 18 ? 'warn' : 'good'} />
+        <StatCard
+          label="CPU"
+          value={num(status?.cpu_pct)}
+          suffix="%"
+          tone={Number(status?.cpu_pct) > 80 ? 'danger' : 'neutral'}
+          progress={clampPct(status?.cpu_pct)}
+        />
+
+        <StatCard
+          label="RAM"
+          value={num(status?.ram_pct)}
+          suffix="%"
+          tone={Number(status?.ram_pct) > 85 ? 'danger' : 'neutral'}
+          progress={clampPct(status?.ram_pct)}
+        />
+
+        <StatCard
+          label="Java"
+          value={num(status?.java_ram)}
+          suffix="MB"
+          hint="Heap"
+        />
+
+        <StatCard
+          label="TPS"
+          value={status?.tps || '--'}
+          suffix=""
+          hint={`MSPT ${status?.mspt || '--'}`}
+          tone={Number(status?.tps) < 18 ? 'warn' : 'good'}
+        />
       </div>
 
       <div className="row g-3 mt-1">
@@ -131,6 +200,7 @@ export default function Dashboard() {
                 <p>Informasi server yang sedang dibaca backend.</p>
               </div>
             </div>
+
             <div className="runtime-grid">
               <RuntimeRow label="Minecraft" value={status?.mc_ver} />
               <RuntimeRow label="Software" value={status?.paper_ver} />
@@ -149,26 +219,39 @@ export default function Dashboard() {
                 <h3>Players</h3>
                 <p>{players.length} online</p>
               </div>
-              <button className="btn btn-sm btn-soft" onClick={loadPlayers}>Refresh</button>
+
+              <button className="btn btn-sm btn-soft" onClick={loadPlayers}>
+                Refresh
+              </button>
             </div>
 
             {players.length ? (
               <div className="player-stack dense">
-                {players.map((p) => (
-                  <div className="player-mini" key={p.name}>
-                    <div className="d-flex align-items-center justify-content-between gap-2">
-                      <div className="player-mini-name">{p.name}</div>
-                      <span className="role-chip">{p.role || 'Member'}</span>
+                {players.map((p) => {
+                  const role = getRole(p)
+
+                  return (
+                    <div className="player-mini" key={p.name}>
+                      <div className="d-flex align-items-center justify-content-between gap-2">
+                        <div className="player-mini-name">{p.name}</div>
+                        <span className={`role-chip ${roleClass(p)}`}>
+                          {role}
+                        </span>
+                      </div>
+
+                      <div className="player-mini-meta">
+                        <span>{p.dimension || '-'}</span>
+                        <span className="font-monospace">{formatPosition(p.position)}</span>
+                      </div>
                     </div>
-                    <div className="player-mini-meta">
-                      <span>{p.dimension || '-'}</span>
-                      <span className="font-monospace">{formatPosition(p.position)}</span>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
-              <EmptyState title="Tidak ada player online" description="Player muncul setelah /api/players berhasil terbaca." />
+              <EmptyState
+                title="Tidak ada player online"
+                description="Player muncul setelah /api/players berhasil terbaca."
+              />
             )}
           </div>
         </div>

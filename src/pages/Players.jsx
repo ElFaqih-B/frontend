@@ -1,71 +1,102 @@
 import React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getJson, postJson } from '../api.js'
-import EmptyState from '../components/EmptyState.jsx'
-import Modal from '../components/Modal.jsx'
-import PageHeader from '../components/PageHeader.jsx'
-import SearchBar from '../components/SearchBar.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-import {
-  formatFood,
-  formatHealth,
-  formatPosition,
-  normalizePlayer,
-  searchablePlayerText,
-  sortPlayers,
-} from '../utils/players.js'
+import { formatPosition, normalizePlayer } from '../utils/players.js'
 
-const ACTIONS = {
-  kick: (p) => `kick ${p}`,
-  ban: (p) => `ban ${p}`,
-  pardon: (p) => `pardon ${p}`,
-  op: (p) => `op ${p}`,
-  deop: (p) => `deop ${p}`,
-  whitelist_add: (p) => `whitelist add ${p}`,
-  whitelist_remove: (p) => `whitelist remove ${p}`,
-  gamemode_creative: (p) => `gamemode creative ${p}`,
-  gamemode_survival: (p) => `gamemode survival ${p}`,
-  kill_player: (p) => `kill ${p}`,
-  heal: (p) => `effect give ${p} minecraft:instant_health 1 255`,
-  feed: (p) => `effect give ${p} minecraft:saturation 1 255`,
+function getRole(player) {
+  const raw = String(
+    player?.role ||
+      player?.rank ||
+      player?.group ||
+      player?.primary_group ||
+      player?.permission_group ||
+      ''
+  ).toLowerCase()
+
+  if (player?.is_op || player?.op || player?.operator) return 'Owner'
+
+  if (
+    raw.includes('owner') ||
+    raw.includes('admin') ||
+    raw.includes('operator') ||
+    raw === 'op'
+  ) {
+    return 'Owner'
+  }
+
+  return 'Member'
 }
 
-function RoleBadge({ role }) {
-  const text = String(role || 'Member')
-  const lower = text.toLowerCase()
-  let cls = 'role-member'
+function roleClass(player) {
+  return getRole(player) === 'Owner' ? 'role-owner' : 'role-member'
+}
 
-  if (lower.includes('owner') || lower.includes('admin') || lower.includes('op')) cls = 'role-admin'
-  else if (lower.includes('mod') || lower.includes('staff')) cls = 'role-staff'
+function val(value) {
+  if (value === null || value === undefined || value === '') return '--'
+  return value
+}
 
-  return <span className={`role-badge ${cls}`}>{text}</span>
+function intVal(value) {
+  if (value === null || value === undefined || value === '') return '--'
+  const n = Number(value)
+  if (Number.isNaN(n)) return '--'
+  return Math.round(n)
+}
+
+function normalizeRows(data) {
+  const source = Array.isArray(data.players)
+    ? data.players
+    : Array.isArray(data.names)
+      ? data.names
+      : []
+
+  return source
+    .map(normalizePlayer)
+    .filter((p) => p.name)
+    .map((p) => ({
+      ...p,
+      role: getRole(p),
+      status: 'Online',
+    }))
+}
+
+function comparePlayer(a, b, key) {
+  if (key === 'role') {
+    const order = { Owner: 0, Member: 1 }
+    return (order[a.role] ?? 99) - (order[b.role] ?? 99)
+  }
+
+  if (key === 'health' || key === 'food' || key === 'level') {
+    return Number(a[key] ?? -1) - Number(b[key] ?? -1)
+  }
+
+  if (key === 'position') {
+    return formatPosition(a.position).localeCompare(formatPosition(b.position))
+  }
+
+  return String(a[key] ?? '').localeCompare(String(b[key] ?? ''))
 }
 
 export default function Players() {
   const toast = useToast()
+
   const [players, setPlayers] = useState([])
-  const [selected, setSelected] = useState(null)
-  const [extra, setExtra] = useState('')
   const [raw, setRaw] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [query, setQuery] = useState('')
-  const [sortBy, setSortBy] = useState('name')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState('role')
+  const [sortDir, setSortDir] = useState('asc')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState('')
 
   const loadPlayers = useCallback(async () => {
-    setLoading(true)
     try {
       const data = await getJson('/api/players')
-      const rows = Array.isArray(data.players)
-        ? data.players.map(normalizePlayer).filter((p) => p.name)
-        : []
-
-      setPlayers(rows)
+      setPlayers(normalizeRows(data))
       setRaw(data.raw || '')
     } catch (e) {
+      toast(e.message || 'Gagal mengambil data player.', 'danger')
       setPlayers([])
-      setRaw('')
-      toast(e.message, 'danger')
     } finally {
       setLoading(false)
     }
@@ -73,128 +104,227 @@ export default function Players() {
 
   useEffect(() => {
     loadPlayers()
+
+    const id = setInterval(loadPlayers, 5000)
+    return () => clearInterval(id)
   }, [loadPlayers])
 
-  const filteredPlayers = useMemo(() => {
-    const q = query.trim().toLowerCase()
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
 
-    const filtered = players.filter((p) => {
-      if (statusFilter === 'valid' && !p.valid) return false
-      if (statusFilter === 'invalid' && p.valid) return false
-      if (!q) return true
-      return searchablePlayerText(p).includes(q)
+    let rows = [...players]
+
+    if (q) {
+      rows = rows.filter((p) => {
+        const haystack = [
+          p.name,
+          p.role,
+          p.status,
+          p.dimension,
+          formatPosition(p.position),
+        ]
+          .join(' ')
+          .toLowerCase()
+
+        return haystack.includes(q)
+      })
+    }
+
+    rows.sort((a, b) => {
+      const result = comparePlayer(a, b, sortBy)
+      return sortDir === 'asc' ? result : -result
     })
 
-    return sortPlayers(filtered, sortBy)
-  }, [players, query, sortBy, statusFilter])
+    return rows
+  }, [players, search, sortBy, sortDir])
 
-  async function act(action) {
-    if (!selected?.name) return
-
-    let cmd = ACTIONS[action] ? ACTIONS[action](selected.name) : `${action} ${selected.name}`
-    if (extra && (action === 'kick' || action === 'ban')) cmd += ` ${extra}`
+  async function runCommand(command, message) {
+    setBusy(command)
 
     try {
-      const data = await postJson('/api/command', { command: cmd })
-      toast(data.response || data.message || 'Command terkirim.', data.success ? 'success' : 'danger')
-      await loadPlayers()
+      const result = await postJson('/api/command', { command })
+      toast(
+        result.message || result.response || result.output || message || 'Command dikirim.',
+        result.success === false ? 'danger' : 'success'
+      )
+
+      setTimeout(loadPlayers, 700)
     } catch (e) {
-      toast(e.message, 'danger')
+      toast(e.message || 'Gagal menjalankan command.', 'danger')
+    } finally {
+      setBusy('')
     }
   }
 
+  function confirmCommand(question, command, message) {
+    if (!window.confirm(question)) return
+    runCommand(command, message)
+  }
+
   return (
-    <>
-      <PageHeader
-        eyebrow="Players"
-        title="Online players"
-        description="Cari, urutkan, dan cek role pemain yang sedang online."
-        actions={(
-          <button className="btn btn-soft" onClick={loadPlayers} disabled={loading}>
-            {loading ? 'Loading...' : 'Refresh'}
+    <div className="players-page">
+      <div className="panel-card mb-3">
+        <div className="panel-head compact">
+          <div>
+            <h3>Players</h3>
+            <p>{players.length} online</p>
+          </div>
+
+          <button className="btn btn-sm btn-soft" onClick={loadPlayers} disabled={loading}>
+            <i className={`bi ${loading ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'} me-1`} />
+            Refresh
           </button>
-        )}
-      />
-
-      <div className="panel-card">
-        <div className="table-toolbar">
-          <SearchBar
-            value={query}
-            onChange={setQuery}
-            placeholder="Cari player, role, world, koordinat..."
-            className="flex-grow-1"
-          />
-
-          <select className="form-select control-compact" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="all">Semua status</option>
-            <option value="valid">Valid</option>
-            <option value="invalid">Invalid</option>
-          </select>
-
-          <select className="form-select control-compact" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-            <option value="name">Nama</option>
-            <option value="role">Role</option>
-            <option value="dimension">World</option>
-            <option value="health">Health</option>
-            <option value="level">Level</option>
-            <option value="status">Status</option>
-          </select>
         </div>
 
-        <div className="panel-subline">
-          <span>{filteredPlayers.length} dari {players.length} player</span>
-          {raw ? <span className="font-monospace text-truncate" title={raw}>RCON: {raw}</span> : null}
-        </div>
+        <div className="row g-2 align-items-center">
+          <div className="col-12 col-lg">
+            <div className="searchbar-wrap">
+              <i className="bi bi-search text-muted" />
+              <input
+                className="form-control"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari player, role, dimension, position..."
+              />
 
+              {search && (
+                <button className="btn btn-sm btn-soft" onClick={() => setSearch('')}>
+                  <i className="bi bi-x-lg" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="col-6 col-lg-auto">
+            <select className="form-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="role">Sort: Role</option>
+              <option value="name">Sort: Name</option>
+              <option value="dimension">Sort: Dimension</option>
+              <option value="position">Sort: Position</option>
+              <option value="health">Sort: Health</option>
+              <option value="food">Sort: Food</option>
+              <option value="level">Sort: Level</option>
+            </select>
+          </div>
+
+          <div className="col-6 col-lg-auto">
+            <button
+              className="btn btn-soft w-100"
+              onClick={() => setSortDir((v) => (v === 'asc' ? 'desc' : 'asc'))}
+            >
+              <i className={`bi ${sortDir === 'asc' ? 'bi-sort-down' : 'bi-sort-up'} me-1`} />
+              {sortDir === 'asc' ? 'Asc' : 'Desc'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
         <div className="table-responsive">
-          <table className="table modern-table align-middle mb-0">
+          <table className="table align-middle mb-0 players-table">
             <thead>
               <tr>
                 <th>Player</th>
                 <th>Role</th>
-                <th>World</th>
+                <th>Status</th>
+                <th>Dimension</th>
                 <th>Position</th>
                 <th>Health</th>
                 <th>Food</th>
                 <th>Level</th>
-                <th>Status</th>
-                <th className="text-end">Action</th>
+                <th className="text-end">Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              {filteredPlayers.length ? (
-                filteredPlayers.map((p) => (
-                  <tr key={p.name}>
-                    <td>
-                      <div className="player-cell">
-                        <div className="player-name">{p.name}</div>
-                        <div className="table-muted">{p.ping ? `${p.ping}ms` : 'online'}</div>
-                      </div>
-                    </td>
-                    <td><RoleBadge role={p.role} /></td>
-                    <td>{p.dimension || '-'}</td>
-                    <td className="font-monospace small">{formatPosition(p.position)}</td>
-                    <td>{formatHealth(p.health)}</td>
-                    <td>{formatFood(p.food)}</td>
-                    <td>{p.level ?? '-'}</td>
-                    <td>
-                      <span className={`state-pill ${p.valid ? 'ok' : 'warn'}`}>{p.valid ? 'Valid' : 'Invalid'}</span>
-                    </td>
-                    <td className="text-end">
-                      <button className="btn btn-sm btn-soft" onClick={() => { setSelected(p); setExtra('') }}>
-                        Kelola
+              {filtered.map((p) => (
+                <tr key={p.name}>
+                  <td>
+                    <div className="player-name-only">{p.name}</div>
+                    <div className="player-mobile-meta">
+                      {val(p.dimension)} · {formatPosition(p.position)}
+                    </div>
+                  </td>
+
+                  <td>
+                    <span className={`role-chip ${roleClass(p)}`}>
+                      {p.role}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span className="online-chip">
+                      <span className="status-dot good" />
+                      Online
+                    </span>
+                  </td>
+
+                  <td className="hide-sm">{val(p.dimension)}</td>
+                  <td className="font-monospace text-muted hide-md">{formatPosition(p.position)}</td>
+                  <td className="font-monospace">{intVal(p.health)}</td>
+                  <td className="font-monospace hide-sm">{intVal(p.food)}</td>
+                  <td className="font-monospace hide-sm">{intVal(p.level)}</td>
+
+                  <td className="text-end">
+                    <div className="player-actions">
+                      <button
+                        className="btn btn-sm btn-soft"
+                        disabled={!!busy}
+                        title="Heal"
+                        onClick={() => runCommand(`effect give ${p.name} minecraft:instant_health 1 10 true`, `${p.name} di-heal.`)}
+                      >
+                        <i className="bi bi-heart-pulse" />
+                        <span>Heal</span>
                       </button>
-                    </td>
-                  </tr>
-                ))
-              ) : (
+
+                      <button
+                        className="btn btn-sm btn-soft"
+                        disabled={!!busy}
+                        title="Feed"
+                        onClick={() => runCommand(`effect give ${p.name} minecraft:saturation 5 5 true`, `${p.name} diberi saturation.`)}
+                      >
+                        <i className="bi bi-egg-fried" />
+                        <span>Feed</span>
+                      </button>
+
+                      <button
+                        className="btn btn-sm btn-soft"
+                        disabled={!!busy}
+                        title="Survival"
+                        onClick={() => runCommand(`gamemode survival ${p.name}`, `${p.name} ke survival.`)}
+                      >
+                        <i className="bi bi-tree" />
+                        <span>Surv</span>
+                      </button>
+
+                      <button
+                        className="btn btn-sm btn-soft"
+                        disabled={!!busy}
+                        title="Creative"
+                        onClick={() => runCommand(`gamemode creative ${p.name}`, `${p.name} ke creative.`)}
+                      >
+                        <i className="bi bi-hammer" />
+                        <span>Creat</span>
+                      </button>
+
+                      <button
+                        className="btn btn-sm btn-soft text-danger"
+                        disabled={!!busy}
+                        title="Kick"
+                        onClick={() => confirmCommand(`Kick ${p.name}?`, `kick ${p.name}`, `${p.name} dikick.`)}
+                      >
+                        <i className="bi bi-box-arrow-right" />
+                        <span>Kick</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+              {!filtered.length && (
                 <tr>
-                  <td colSpan="9">
-                    <EmptyState
-                      title={players.length ? 'Tidak ada hasil cocok' : 'Tidak ada player online'}
-                      description={players.length ? 'Ubah kata kunci, filter, atau sort.' : 'Data muncul setelah /api/players mengembalikan player online.'}
-                    />
+                  <td colSpan="9" className="text-center text-muted py-5">
+                    Tidak ada player online / tidak ada hasil pencarian.
                   </td>
                 </tr>
               )}
@@ -203,46 +333,12 @@ export default function Players() {
         </div>
       </div>
 
-      <Modal
-        open={!!selected}
-        onClose={() => setSelected(null)}
-        title={selected ? <span>Kelola: <span className="text-primary">{selected.name}</span></span> : 'Kelola Player'}
-        size="modal-panel-sm"
-      >
-        <div className="p-4">
-          {selected ? (
-            <div className="selected-player-card mb-4">
-              <div>
-                <div className="fw-semibold text-light">{selected.name}</div>
-                <div className="text-muted small">{selected.role || 'Member'} · {selected.dimension || 'Unknown world'}</div>
-              </div>
-            </div>
-          ) : null}
-
-          <label className="form-label text-muted small fw-medium">Reason / Extra Parameter</label>
-          <input
-            className="form-control mb-4"
-            value={extra}
-            onChange={(e) => setExtra(e.target.value)}
-            placeholder="Contoh: Spamming/Cheating"
-          />
-
-          <div className="action-grid">
-            <button className="btn btn-sm btn-soft" onClick={() => act('kick')}>Kick</button>
-            <button className="btn btn-sm btn-soft text-danger" onClick={() => act('ban')}>Ban</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('pardon')}>Pardon</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('op')}>Set OP</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('deop')}>DeOP</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('whitelist_add')}>Whitelist +</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('whitelist_remove')}>Whitelist -</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('gamemode_creative')}>GMC</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('gamemode_survival')}>GMS</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('heal')}>Heal</button>
-            <button className="btn btn-sm btn-soft" onClick={() => act('feed')}>Feed</button>
-            <button className="btn btn-sm btn-danger" onClick={() => act('kill_player')}>Kill</button>
-          </div>
-        </div>
-      </Modal>
-    </>
+      {raw && (
+        <details className="panel-card mt-3">
+          <summary className="text-muted small">Raw player output</summary>
+          <pre className="small font-monospace text-muted mt-2 mb-0 overflow-auto">{raw}</pre>
+        </details>
+      )}
+    </div>
   )
 }
