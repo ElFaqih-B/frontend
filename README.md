@@ -1,4 +1,11 @@
+<<<<<<< HEAD
 # Local Minecraft Server Dashboard Frontend
+=======
+cd ~/Documents/game/dashboard/frontend
+
+cat > README.md <<'EOF'
+# craft.panel — Minecraft Server Dashboard Frontend
+>>>>>>> 3b356e1 ("readme.md")
 
 Frontend dashboard untuk mengontrol server Minecraft Paper lokal melalui backend FastAPI. Frontend ini dibuat dengan React + Vite dan dideploy ke Vercel, sementara backend tetap berjalan secara lokal dan diakses melalui Cloudflare Tunnel.
 
@@ -11,7 +18,11 @@ Vercel Frontend → Cloudflare Tunnel → FastAPI Backend Lokal → Paper Minecr
 - Dashboard status server: TPS, CPU, RAM, disk, uptime, dan pemain online.
 - Console server realtime dengan highlight chat player, warning, error, command, join/leave event.
 - Players page dengan search, sort by, status, role/rank, health, food, level, dimension, dan position.
+<<<<<<< HEAD
 - Files page bergaya VS Code untuk browsing dan edit file server.
+=======
+- Files page seperti VS Code untuk browsing dan edit file server.
+>>>>>>> 3b356e1 ("readme.md")
 - Search file di explorer dan search isi code/config.
 - Settings page untuk mengatur `server.properties`.
 - Accent color bisa diganti bebas dari sidebar dan tersimpan di browser.
@@ -20,4 +31,8 @@ Vercel Frontend → Cloudflare Tunnel → FastAPI Backend Lokal → Paper Minecr
 ## Install
 
 ```bash
+<<<<<<< HEAD
 npm install
+=======
+npm install
+>>>>>>> 3b356e1 ("readme.md")
