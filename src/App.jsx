@@ -7,6 +7,7 @@ import RequireAuth from './components/RequireAuth.jsx'
 import { ToastProvider } from './contexts/ToastContext.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 
+import AdminActivity from './pages/AdminActivity.jsx'
 import Backups from './pages/Backups.jsx'
 import Console from './pages/Console.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -24,6 +25,7 @@ export default function App() {
         <RequireAuth>
           <Layout>
             <Routes>
+              <Route path="/admin-activity" element={<AdminActivity />} />
               <Route path="/" element={<Dashboard />} />
               <Route path="/console" element={<Console />} />
               <Route path="/players" element={<Players />} />

@@ -6,14 +6,27 @@ import { pages, pageTitle } from '../constants/navigation.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import AccentPicker from './AccentPicker.jsx'
 
+const SERVER_KEYS = new Set([
+  'dashboard',
+  'console',
+  'players',
+  'worlds',
+  'plugins',
+  'files',
+  'backups',
+  'scheduler',
+])
+
+const OWNER_ONLY_KEYS = new Set([
+  'settings',
+  'admin-activity',
+])
+
 function statusClass(status) {
   const value = String(status || '').toUpperCase()
 
   if (value === 'ONLINE') return 'online'
   if (value === 'STARTING') return 'starting'
-  if (value === 'API OFFLINE') return 'offline'
-  if (value === 'OFFLINE') return 'offline'
-  if (value === 'STOPPED') return 'offline'
 
   return 'offline'
 }
@@ -27,27 +40,49 @@ function statusLabel(status) {
   return value
 }
 
-function navGroup(key) {
-  if (
-    [
-      'dashboard',
-      'console',
-      'players',
-      'worlds',
-      'plugins',
-      'files',
-      'backups',
-      'scheduler',
-    ].includes(key)
-  ) {
-    return 'Server'
-  }
+function getGroups(roleValue) {
+  const role = String(roleValue || '').toLowerCase()
 
-  return 'Sistem'
+  const visiblePages = pages.filter(([, key]) => {
+    if (OWNER_ONLY_KEYS.has(key)) {
+      return role === 'owner'
+    }
+
+    return true
+  })
+
+  return [
+    {
+      title: 'Server',
+      items: visiblePages.filter(([, key]) => SERVER_KEYS.has(key)),
+    },
+    {
+      title: 'Sistem',
+      items: visiblePages.filter(([, key]) => !SERVER_KEYS.has(key)),
+    },
+  ].filter((group) => group.items.length)
+}
+
+function SidebarLink({ item, onClick }) {
+  const [path, key, icon, label] = item
+
+  return (
+    <NavLink
+      to={path}
+      end={path === '/'}
+      className="nav-link nav-item"
+      onClick={onClick}
+      title={label}
+    >
+      <i className={`bi ${icon}`} />
+      <span>{label}</span>
+    </NavLink>
+  )
 }
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth()
+  const location = useLocation()
 
   const [sideOpen, setSideOpen] = useState(false)
   const [logoutOpen, setLogoutOpen] = useState(false)
@@ -60,8 +95,8 @@ export default function Layout({ children }) {
     uptime: '--',
   })
 
-  const location = useLocation()
   const apiBase = useMemo(() => apiUrl(), [])
+  const groups = useMemo(() => getGroups(user?.role), [user?.role])
 
   const pollStatus = useCallback(async () => {
     try {
@@ -86,24 +121,18 @@ export default function Layout({ children }) {
   }, [pollStatus])
 
   useEffect(() => {
+    if (!logoutOpen) return
+
     function onKeyDown(e) {
       if (e.key === 'Escape') {
         setLogoutOpen(false)
       }
     }
 
-    if (logoutOpen) {
-      window.addEventListener('keydown', onKeyDown)
-    }
+    window.addEventListener('keydown', onKeyDown)
 
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-    }
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [logoutOpen])
-
-  function handleLogout() {
-    setLogoutOpen(true)
-  }
 
   async function confirmLogout() {
     setLogoutBusy(true)
@@ -113,14 +142,13 @@ export default function Layout({ children }) {
     } finally {
       setLogoutBusy(false)
       setLogoutOpen(false)
+      setSideOpen(false)
     }
   }
 
   const tone = statusClass(status.status)
   const label = statusLabel(status.status)
   const title = pageTitle(location.pathname)
-
-  let currentGroup = ''
 
   return (
     <>
@@ -138,10 +166,7 @@ export default function Layout({ children }) {
 
             <div className="confirm-content">
               <h3>Logout dari dashboard?</h3>
-              <p>
-                Sesi login di browser ini akan dihapus. Kamu perlu login ulang untuk
-                mengakses panel.
-              </p>
+              <p>Sesi login di browser ini akan dihapus. Kamu perlu login ulang untuk mengakses panel.</p>
             </div>
 
             <div className="confirm-actions">
@@ -169,48 +194,34 @@ export default function Layout({ children }) {
 
       <aside id="sb" className={sideOpen ? 'open' : ''}>
         <div className="brand">
-          <div className="min-w-0">
+          <div className="brand-text">
             <div className="brand-title">PooPers.panel</div>
             <div className="brand-subtitle">Minecraft Server Control</div>
           </div>
         </div>
 
-        <nav className="nav flex-column sidebar-nav">
-          {pages.map(([path, key, icon, label]) => {
-            const group = navGroup(key)
-            const showLabel = group !== currentGroup
-            currentGroup = group
+        <nav className="sidebar-nav" aria-label="Sidebar navigation">
+          {groups.map((group) => (
+            <section className="sidebar-nav-group" key={group.title}>
+              <div className="nav-group-label">{group.title}</div>
 
-            return (
-              <React.Fragment key={key}>
-                {showLabel ? <div className="nav-group-label">{group}</div> : null}
-
-                <NavLink
-                  to={path}
-                  end={path === '/'}
-                  className="nav-link nav-item"
-                  onClick={() => setSideOpen(false)}
-                >
-                  <i className={`bi ${icon}`} />
-                  <span>{label}</span>
-                </NavLink>
-              </React.Fragment>
-            )
-          })}
+              <div className="sidebar-nav-items">
+                {group.items.map((item) => (
+                  <SidebarLink
+                    key={item[1]}
+                    item={item}
+                    onClick={() => setSideOpen(false)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
         </nav>
 
-        <AccentPicker placement="sidebar" />
-
         <div className="sidebar-footer">
-          <div className={`sidebar-server-status ${tone}`}>
-            <span className="layout-status-dot" />
-
-            <div className="sidebar-server-text">
-              <b>{label}</b>
-              <small title={apiBase}>{apiBase}</small>
-            </div>
+          <div className="sidebar-accent-box">
+            <AccentPicker placement="sidebar" />
           </div>
-
           <div className="sidebar-user-box">
             <div className="sidebar-user-main">
               <span className="sidebar-user-icon">
@@ -218,12 +229,16 @@ export default function Layout({ children }) {
               </span>
 
               <div className="sidebar-user-text">
-                <b>{user?.username || 'Admin'}</b>
+                <b title={user?.username || 'Admin'}>{user?.username || 'Admin'}</b>
                 <small>{user?.role || 'admin'}</small>
               </div>
             </div>
 
-            <button className="sidebar-logout-btn" onClick={handleLogout}>
+            <button
+              className="sidebar-logout-btn"
+              type="button"
+              onClick={() => setLogoutOpen(true)}
+            >
               <i className="bi bi-box-arrow-right" />
               <span>Logout</span>
             </button>
@@ -233,17 +248,18 @@ export default function Layout({ children }) {
 
       <div id="mc">
         <header id="topbar" className="topbar">
-          <div className="d-flex align-items-center gap-3 min-w-0">
+          <div className="topbar-left">
             <button
               className="btn btn-icon d-md-none"
+              type="button"
               onClick={() => setSideOpen((value) => !value)}
               aria-label="Toggle sidebar"
             >
               <i className="bi bi-list" />
             </button>
 
-            <div className="min-w-0">
-              <div className="topbar-title">{title}</div>
+            <div className="topbar-title-wrap">
+              <div className="topbar-title" title={title}>{title}</div>
             </div>
           </div>
 
@@ -253,7 +269,12 @@ export default function Layout({ children }) {
               <span>{label}</span>
             </div>
 
-            <button className="topbar-logout-btn" onClick={handleLogout} title="Logout">
+            <button
+              className="topbar-logout-btn"
+              type="button"
+              onClick={() => setLogoutOpen(true)}
+              title="Logout"
+            >
               <i className="bi bi-box-arrow-right" />
             </button>
           </div>
