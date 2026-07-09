@@ -1,52 +1,104 @@
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+const TOKEN_KEY = 'poopers_panel_token'
 
 export function apiUrl(path = '') {
   if (!path) return API_BASE
   return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`
 }
 
-export function wsUrl(path = '') {
-  const url = new URL(apiUrl(path))
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  return url.toString()
+export function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
 }
 
-async function parseResponse(res, path) {
+export function saveToken(token) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token)
+  } catch {}
+}
+
+export function clearToken() {
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+  } catch {}
+}
+
+function authHeaders(extra = {}) {
+  const headers = new Headers(extra)
+  const token = getToken()
+
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  return headers
+}
+
+async function parseResponse(res) {
   const text = await res.text()
-  let payload = null
 
   try {
-    payload = text ? JSON.parse(text) : {}
+    return text ? JSON.parse(text) : {}
   } catch {
-    payload = { message: text || `${res.status} ${res.statusText}` }
+    return { success: false, message: text || res.statusText }
+  }
+}
+
+async function request(path, options = {}) {
+  const res = await fetch(apiUrl(path), {
+    ...options,
+    headers: authHeaders(options.headers),
+  })
+
+  const data = await parseResponse(res)
+
+  if (res.status === 401) {
+    clearToken()
+    window.dispatchEvent(new Event('auth:unauthorized'))
+    throw new Error(data.message || 'Unauthorized. Silakan login ulang.')
   }
 
   if (!res.ok) {
-    const msg = payload?.detail || payload?.message || `${path} gagal: ${res.status}`
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    throw new Error(data.message || data.detail || `Request gagal: ${res.status}`)
   }
 
-  return payload
+  return data
 }
 
-export async function getJson(path) {
-  const res = await fetch(apiUrl(path))
-  return parseResponse(res, path)
-}
-
-export async function postJson(path, body = {}) {
-  const res = await fetch(apiUrl(path), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+export function getJson(path) {
+  return request(path, {
+    method: 'GET',
   })
-  return parseResponse(res, path)
 }
 
-export async function postForm(path, formData) {
-  const res = await fetch(apiUrl(path), {
+export function postJson(path, body = {}) {
+  return request(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body ?? {}),
+  })
+}
+
+export function postForm(path, formData) {
+  return request(path, {
     method: 'POST',
     body: formData,
   })
-  return parseResponse(res, path)
+}
+
+export function wsUrl(path = '') {
+  const url = new URL(apiUrl(path))
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+
+  const token = getToken()
+  if (token) {
+    url.searchParams.set('token', token)
+  }
+
+  return url.toString()
 }
