@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { apiUrl, getJson } from '../api.js'
 import { pages, pageTitle } from '../constants/navigation.js'
+import { useAuth } from '../contexts/AuthContext.jsx'
 import AccentPicker from './AccentPicker.jsx'
 
 function statusClass(status) {
@@ -46,7 +47,12 @@ function navGroup(key) {
 }
 
 export default function Layout({ children }) {
+  const { user, logout } = useAuth()
+
   const [sideOpen, setSideOpen] = useState(false)
+  const [logoutOpen, setLogoutOpen] = useState(false)
+  const [logoutBusy, setLogoutBusy] = useState(false)
+
   const [status, setStatus] = useState({
     status: '...',
     tps: '--',
@@ -79,6 +85,37 @@ export default function Layout({ children }) {
     return () => clearInterval(id)
   }, [pollStatus])
 
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        setLogoutOpen(false)
+      }
+    }
+
+    if (logoutOpen) {
+      window.addEventListener('keydown', onKeyDown)
+    }
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [logoutOpen])
+
+  function handleLogout() {
+    setLogoutOpen(true)
+  }
+
+  async function confirmLogout() {
+    setLogoutBusy(true)
+
+    try {
+      await logout()
+    } finally {
+      setLogoutBusy(false)
+      setLogoutOpen(false)
+    }
+  }
+
   const tone = statusClass(status.status)
   const label = statusLabel(status.status)
   const title = pageTitle(location.pathname)
@@ -91,6 +128,44 @@ export default function Layout({ children }) {
         className={`sidebar-scrim ${sideOpen ? 'show' : ''}`}
         onClick={() => setSideOpen(false)}
       />
+
+      {logoutOpen && (
+        <div className="confirm-backdrop" onMouseDown={() => setLogoutOpen(false)}>
+          <div className="confirm-dialog" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="confirm-icon danger">
+              <i className="bi bi-box-arrow-right" />
+            </div>
+
+            <div className="confirm-content">
+              <h3>Logout dari dashboard?</h3>
+              <p>
+                Sesi login di browser ini akan dihapus. Kamu perlu login ulang untuk
+                mengakses panel.
+              </p>
+            </div>
+
+            <div className="confirm-actions">
+              <button
+                className="btn btn-soft"
+                type="button"
+                onClick={() => setLogoutOpen(false)}
+                disabled={logoutBusy}
+              >
+                Batal
+              </button>
+
+              <button
+                className="btn btn-danger-soft"
+                type="button"
+                onClick={confirmLogout}
+                disabled={logoutBusy}
+              >
+                {logoutBusy ? 'Logout...' : 'Logout'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <aside id="sb" className={sideOpen ? 'open' : ''}>
         <div className="brand">
@@ -135,6 +210,24 @@ export default function Layout({ children }) {
               <small title={apiBase}>{apiBase}</small>
             </div>
           </div>
+
+          <div className="sidebar-user-box">
+            <div className="sidebar-user-main">
+              <span className="sidebar-user-icon">
+                <i className="bi bi-person" />
+              </span>
+
+              <div className="sidebar-user-text">
+                <b>{user?.username || 'Admin'}</b>
+                <small>{user?.role || 'admin'}</small>
+              </div>
+            </div>
+
+            <button className="sidebar-logout-btn" onClick={handleLogout}>
+              <i className="bi bi-box-arrow-right" />
+              <span>Logout</span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -159,6 +252,10 @@ export default function Layout({ children }) {
               <span className="layout-status-dot" />
               <span>{label}</span>
             </div>
+
+            <button className="topbar-logout-btn" onClick={handleLogout} title="Logout">
+              <i className="bi bi-box-arrow-right" />
+            </button>
           </div>
         </header>
 
