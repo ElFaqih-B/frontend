@@ -2430,10 +2430,6 @@ body {
   }
 }
 
-/* =========================================
-   Fix Files Explorer Scroll
-========================================= */
-
 .files-workbench {
   height: calc(100vh - 64px - 48px) !important;
   min-height: 0 !important;
