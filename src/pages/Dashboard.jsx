@@ -113,7 +113,7 @@ function PlayerDropdown({ players }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <div className="truncate text-[12.5px] font-semibold text-textc">{p.name}</div>
-                    <span className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] ${roleLabel(p) === 'Owner' ? 'border-[#a970ff]/50 bg-[#a970ff]/10 text-[#caa7ff]' : 'border-green/40 bg-green/10 text-green'}`}>{roleLabel(p)}</span>
+                    <span className={`shrink-0 rounded py-0.5 font-mono text-[10px] ${roleLabel(p) === 'Owner' ? 'border-[#a970ff]/50 bg-[#a970ff]/10 text-[#caa7ff]' : 'border-green/40 bg-green/10 text-green'}`}>{roleLabel(p)}</span>
                   </div>
                   <div className="truncate font-mono text-[11px] text-faint">{p.dimension || '-'} · {formatPosition(p.position)}</div>
                 </div>

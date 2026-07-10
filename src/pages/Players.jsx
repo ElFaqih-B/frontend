@@ -152,7 +152,7 @@ export default function Players() {
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-2">
                       <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-textc" title={p.name}>{p.name}</h3>
-                      <span className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] ${roleClass(p)}`}>{role}</span>
+                      <span className={`shrink-0 rounded py-0.5 font-mono text-[10px] ${roleClass(p)}`}>{role}</span>
                     </div>
 
                     <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-faint">
