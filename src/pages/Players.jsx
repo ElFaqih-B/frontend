@@ -96,6 +96,7 @@ export default function Players() {
   const quickActions = [
     ['Heal', 'heal {player}'],
     ['Feed', 'feed {player}'],
+    ['Fly', 'fly {player}'],
     ['Survival', 'gamemode survival {player}'],
     ['Creative', 'gamemode creative {player}'],
   ]
