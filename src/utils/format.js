@@ -21,6 +21,9 @@ export function dash(value) {
   return value
 }
 
-export function formatBytesText(text) {
-  return text || '--'
+export function fmtTime(value) {
+  if (!value) return '--'
+  try { return new Date(value).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) } catch { return String(value) }
 }
+
+export function formatBytesText(text) { return text || '--' }

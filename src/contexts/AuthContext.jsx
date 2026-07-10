@@ -11,11 +11,9 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try {
-      if (getToken()) {
-        await postJson('/api/auth/logout')
-      }
+      if (getToken()) await postJson('/api/auth/logout')
     } catch {
-      // tetap logout lokal walau backend gagal
+      // logout lokal tetap dilakukan
     } finally {
       clearToken()
       setTokenState(null)
@@ -25,7 +23,6 @@ export function AuthProvider({ children }) {
 
   const checkSession = useCallback(async () => {
     const currentToken = getToken()
-
     if (!currentToken) {
       setTokenState(null)
       setUser(null)
@@ -35,7 +32,6 @@ export function AuthProvider({ children }) {
 
     try {
       const data = await getJson('/api/auth/me')
-
       if (data.success && data.user) {
         setTokenState(currentToken)
         setUser(data.user)
@@ -56,64 +52,35 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (username, password) => {
     const res = await fetch(apiUrl('/api/auth/login'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     })
-
     const data = await res.json().catch(() => ({}))
-
-    if (!res.ok || !data.success || !data.token) {
-      throw new Error(data.message || 'Login gagal.')
-    }
-
+    if (!res.ok || !data.success || !data.token) throw new Error(data.message || 'Login gagal.')
     saveToken(data.token)
     setTokenState(data.token)
     setUser(data.user || { username })
-
     return data
   }, [])
 
   useEffect(() => {
     checkSession()
-
     function onUnauthorized() {
       clearToken()
       setTokenState(null)
       setUser(null)
     }
-
     window.addEventListener('auth:unauthorized', onUnauthorized)
-
-    return () => {
-      window.removeEventListener('auth:unauthorized', onUnauthorized)
-    }
+    return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
   }, [checkSession])
 
-  const value = useMemo(() => ({
-    token,
-    user,
-    loading,
-    isAuthenticated: Boolean(token),
-    login,
-    logout,
-    checkSession,
-  }), [token, user, loading, login, logout, checkSession])
+  const value = useMemo(() => ({ token, user, loading, isAuthenticated: Boolean(token), login, logout, checkSession }), [token, user, loading, login, logout, checkSession])
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  )
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
   const ctx = useContext(AuthContext)
-
-  if (!ctx) {
-    throw new Error('useAuth harus dipakai di dalam AuthProvider')
-  }
-
+  if (!ctx) throw new Error('useAuth harus dipakai di dalam AuthProvider')
   return ctx
 }

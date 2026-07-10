@@ -1,120 +1,84 @@
-import React from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { getJson, postJson } from '../api.js'
+import EmptyState from '../components/EmptyState.jsx'
+import Icon from '../components/Icons.jsx'
+import PageHeader from '../components/PageHeader.jsx'
+import SearchBar from '../components/SearchBar.jsx'
+import SelectMenu from '../components/SelectMenu.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
+import { fmtTime } from '../utils/format.js'
 
 const AUDIT_FETCH_LIMIT = 500
-const AUDIT_DISPLAY_LIMIT = 10
-const SESSION_DISPLAY_LIMIT = 4
-
-function fmtTime(value) {
-  if (!value) return '--'
-
-  try {
-    return new Date(value).toLocaleString('id-ID', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    })
-  } catch {
-    return value
-  }
-}
+const AUDIT_DISPLAY_LIMIT = 12
 
 function riskLevel(action = '', target = '') {
   const a = String(action).toUpperCase()
   const t = String(target).toLowerCase()
-
   if (a.includes('LOGIN_FAILED')) return 'blocked'
   if (a.includes('REVOKE')) return 'high'
   if (t.includes('/kill') || t.includes('/settings') || t.includes('/plugins') || t.includes('/files')) return 'critical'
   if (t.includes('/restart') || t.includes('/stop') || t.includes('/backups')) return 'high'
   if (t.includes('/command') || t.includes('/players')) return 'medium'
-  if (a.includes('LOGIN') || a.includes('LOGOUT')) return 'low'
-
   return 'low'
 }
 
-function riskLabel(level) {
-  if (level === 'critical') return 'Critical'
-  if (level === 'high') return 'High'
-  if (level === 'medium') return 'Medium'
-  if (level === 'blocked') return 'Blocked'
-  return 'Low'
-}
-
-function shortHash(value) {
-  if (!value) return '--'
-  return `${value.slice(0, 10)}...`
-}
-
-function compactText(value) {
-  if (!value) return '--'
-  return String(value)
+function riskClass(level) {
+  if (level === 'critical') return 'border-red text-red bg-red/10'
+  if (level === 'high') return 'border-yellow text-yellow bg-yellow/10'
+  if (level === 'medium') return 'border-blue text-blue bg-blue/10'
+  if (level === 'blocked') return 'border-red text-red bg-red/10'
+  return 'border-green text-green bg-green/10'
 }
 
 function formatAuditTarget(item) {
   const action = String(item?.action || '').toUpperCase()
   const target = String(item?.target || '')
-
   const t = target.toLowerCase()
-
   if (action === 'LOGIN_SUCCESS') return 'Login berhasil'
   if (action === 'LOGIN_FAILED') return 'Login gagal'
   if (action === 'LOGOUT') return 'Logout dari dashboard'
-  if (action === 'CHANGE_PASSWORD') return 'Mengganti password'
-  if (action === 'REVOKE_SESSION') {
-    const username = target.startsWith('session:') ? target.replace('session:', '') : ''
-    return username ? `Mencabut session ${username}` : 'Mencabut session admin'
-  }
-
+  if (action === 'REVOKE_SESSION') return 'Mencabut session admin'
   if (t === '/api/start') return 'Memulai server'
   if (t === '/api/stop') return 'Menghentikan server'
   if (t === '/api/restart') return 'Restart server'
   if (t === '/api/kill') return 'Mematikan paksa proses Java'
-
-  if (t === '/api/status') return 'Melihat status server'
-  if (t === '/api/players') return 'Melihat daftar player'
-  if (t === '/api/worlds') return 'Melihat daftar world'
-  if (t === '/api/plugins') return 'Melihat daftar plugin'
-  if (t === '/api/files') return 'Membuka file manager'
-  if (t === '/api/backups') return 'Melihat daftar backup'
-  if (t === '/api/settings') return 'Membuka settings'
-
   if (t.includes('/api/command')) return 'Menjalankan command console'
-
   if (t.includes('/api/plugins/upload')) return 'Menambahkan plugin'
-  if (t.includes('/api/plugins/delete')) return 'Menghapus plugin'
-  if (t.includes('/api/plugins/enable')) return 'Mengaktifkan plugin'
-  if (t.includes('/api/plugins/disable')) return 'Menonaktifkan plugin'
-
-  if (t.includes('/api/files/save')) return 'Mengedit file server'
+  if (t.includes('/api/plugins/delete') || t.includes('/api/plugin/delete')) return 'Menghapus plugin'
+  if (t.includes('/api/files/write')) return 'Mengedit file server'
   if (t.includes('/api/files/upload')) return 'Mengupload file server'
   if (t.includes('/api/files/delete')) return 'Menghapus file server'
-  if (t.includes('/api/files/rename')) return 'Mengubah nama file server'
-
-  if (t.includes('/api/backups/create')) return 'Membuat backup'
-  if (t.includes('/api/backups/restore')) return 'Restore backup'
-  if (t.includes('/api/backups/delete')) return 'Menghapus backup'
-
-  if (t.includes('/api/worlds/delete')) return 'Menghapus world'
-  if (t.includes('/api/worlds/create')) return 'Membuat world'
-  if (t.includes('/api/worlds/load')) return 'Load world'
-  if (t.includes('/api/worlds/unload')) return 'Unload world'
-
+  if (t.includes('/api/backups/create') || t.includes('/api/backup/create')) return 'Membuat backup'
+  if (t.includes('/api/backups/restore') || t.includes('/api/backup/restore')) return 'Restore backup'
+  if (t.includes('/api/world')) return 'Mengatur world server'
   if (t.includes('/api/auth/audit')) return 'Membuka Admin Activity'
   if (t.includes('/api/auth/sessions')) return 'Melihat session admin'
-  if (t.includes('/api/auth/me')) return 'Memeriksa session login'
-
   return target || action || '--'
 }
 
-function AuditStat({ label, value, hint }) {
+function shortHash(value) {
+  return value ? `${String(value).slice(0, 10)}...` : '--'
+}
+
+function TabButton({ active, children, onClick }) {
   return (
-    <div className="activity-stat">
-      <div className="activity-stat-label">{label}</div>
-      <div className="activity-stat-value">{value ?? '--'}</div>
-      {hint ? <div className="activity-stat-hint">{hint}</div> : null}
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-panel border px-3 py-2 text-sm font-semibold transition ${active ? 'border-[color-mix(in_srgb,var(--accent)_35%,transparent)] bg-[var(--accent-dim2)] text-[var(--accent-text)]' : 'border-borderc bg-panel text-dim hover:bg-hover hover:text-textc'}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function Stat({ label, value, hint }) {
+  return (
+    <div className="rounded-panel border border-soft bg-raised p-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-faint">{label}</div>
+      <div className="mt-1 text-xl font-bold text-textc">{value ?? '--'}</div>
+      <div className="text-[11px] text-faint">{hint}</div>
     </div>
   )
 }
@@ -123,91 +87,54 @@ export default function AdminActivity() {
   const toast = useToast()
   const { user } = useAuth()
 
-  const [summary, setSummary] = useState(null)
+  const [tab, setTab] = useState('summary')
+  const [summary, setSummary] = useState({})
   const [logs, setLogs] = useState([])
   const [sessions, setSessions] = useState([])
   const [query, setQuery] = useState('')
   const [filterRisk, setFilterRisk] = useState('all')
-  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
 
   const isOwner = user?.role === 'owner'
 
   const loadData = useCallback(async () => {
-    setLoading(true)
-
     try {
       const [summaryData, auditData, sessionData] = await Promise.all([
         getJson('/api/auth/audit/summary'),
         getJson(`/api/auth/audit?limit=${AUDIT_FETCH_LIMIT}`),
         getJson('/api/auth/sessions'),
       ])
-
       setSummary(summaryData.summary || {})
       setLogs(Array.isArray(auditData.logs) ? auditData.logs : [])
       setSessions(Array.isArray(sessionData.sessions) ? sessionData.sessions : [])
     } catch (e) {
-      toast(e.message || 'Gagal memuat admin activity.', 'danger')
-    } finally {
-      setLoading(false)
+      toast(e.message || 'Gagal memuat Admin Activity.', 'danger')
     }
   }, [toast])
 
   useEffect(() => {
-    if (isOwner) {
-      loadData()
-    }
+    if (isOwner) loadData()
   }, [isOwner, loadData])
 
   const filteredLogs = useMemo(() => {
     const q = query.trim().toLowerCase()
-
     return logs.filter((item) => {
       const level = riskLevel(item.action, item.target)
-
-      if (filterRisk !== 'all' && level !== filterRisk) {
-        return false
-      }
-
+      if (filterRisk !== 'all' && level !== filterRisk) return false
       if (!q) return true
-
-      const haystack = [
-        item.username,
-        item.action,
-        item.target,
-        formatAuditTarget(item),
-        item.ip,
-        item.created_at,
-        ]
-        .join(' ')
-        .toLowerCase()
-
-      return haystack.includes(q)
+      return [item.username, item.action, item.target, formatAuditTarget(item), item.ip, item.created_at].join(' ').toLowerCase().includes(q)
     })
   }, [logs, query, filterRisk])
 
-  const visibleLogs = useMemo(() => {
-    return filteredLogs.slice(0, AUDIT_DISPLAY_LIMIT)
-  }, [filteredLogs])
-
-  const visibleSessions = useMemo(() => {
-    return sessions.slice(0, SESSION_DISPLAY_LIMIT)
-  }, [sessions])
+  const visibleLogs = filteredLogs.slice(0, AUDIT_DISPLAY_LIMIT)
 
   async function revokeSession(tokenHash, username) {
-    const ok = window.confirm(`Revoke session milik ${username}?`)
-
-    if (!ok) return
-
+    if (!window.confirm(`Revoke session milik ${username}?`)) return
     setBusy(tokenHash)
-
     try {
-      const res = await postJson('/api/auth/sessions/revoke', {
-        token_hash: tokenHash,
-      })
-
-      toast(res.message || 'Session berhasil direvoke.', res.success ? 'success' : 'danger')
-      await loadData()
+      const data = await postJson('/api/auth/sessions/revoke', { token_hash: tokenHash })
+      toast(data.message || 'Session direvoke.', data.success === false ? 'danger' : 'success')
+      if (data.success !== false) loadData()
     } catch (e) {
       toast(e.message || 'Gagal revoke session.', 'danger')
     } finally {
@@ -217,189 +144,119 @@ export default function AdminActivity() {
 
   if (!isOwner) {
     return (
-      <div className="panel-card">
-        <div className="panel-head compact">
-          <div>
-            <h3>Admin Activity</h3>
-            <p>Halaman ini hanya bisa diakses oleh owner.</p>
-          </div>
-        </div>
-
-        <div className="text-muted">
-          Akunmu saat ini role-nya <b>{user?.role || 'unknown'}</b>.
-        </div>
-      </div>
+      <section className="panel-pad">
+        <h3 className="text-base font-semibold text-textc">Admin Activity</h3>
+        <p className="mt-1 text-sm text-dim">Halaman ini hanya bisa diakses owner. Role akunmu: <b>{user?.role || 'unknown'}</b>.</p>
+      </section>
     )
   }
 
   return (
-    <div className="admin-activity-page admin-activity-compact">
-      <section className="activity-hero panel-card">
-        <div className="activity-hero-copy">
-          <div className="activity-eyebrow">System Monitor</div>
-          <h3>Admin Activity</h3>
-          <p>Pantau login, session, command, dan aktivitas penting dari admin dashboard.</p>
+    <div className="space-y-3">
+      <PageHeader eyebrow="System Monitor" title="Admin Activity" desc="Dipisah menjadi sub-pages agar log, session, dan ringkasan tidak saling menumpuk." actions={<button className="btn" onClick={loadData}><Icon name="refresh" className="h-3.5 w-3.5" />Refresh</button>} />
 
-          <div className="activity-hero-actions">
-            <button className="btn btn-sm btn-soft" onClick={loadData} disabled={loading}>
-              <i className={`bi ${loading ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'} me-1`} />
-              Refresh
-            </button>
+      <nav className="flex flex-wrap gap-2">
+        <TabButton active={tab === 'summary'} onClick={() => setTab('summary')}>Summary</TabButton>
+        <TabButton active={tab === 'logs'} onClick={() => setTab('logs')}>Audit logs</TabButton>
+        <TabButton active={tab === 'sessions'} onClick={() => setTab('sessions')}>Active sessions</TabButton>
+      </nav>
 
-            <span className="activity-mini-note">
-              Fetch {logs.length} logs · tampil {AUDIT_DISPLAY_LIMIT}
-            </span>
-          </div>
-        </div>
-
-        <div className="activity-stat-grid">
-          <AuditStat label="Actions" value={summary?.total_actions} hint="Log terbaru" />
-          <AuditStat label="Admins" value={summary?.active_admins} hint="Aktif" />
-          <AuditStat label="Commands" value={summary?.commands} hint="Console/API" />
-          <AuditStat label="Server" value={summary?.server_actions} hint="Start/restart" />
-          <AuditStat label="Files" value={summary?.file_actions} hint="File access" />
-          <AuditStat label="Failed" value={summary?.failed_login} hint="Login gagal" />
-        </div>
-      </section>
-
-      <div className="activity-content-grid">
-        <section className="panel-card activity-log-panel">
-          <div className="activity-section-head">
-            <div>
-              <h3>Audit Logs</h3>
-              <p>Menampilkan {visibleLogs.length} dari {filteredLogs.length} hasil pencarian</p>
-            </div>
-          </div>
-
-          <div className="activity-toolbar">
-            <div className="searchbar-wrap">
-              <i className="bi bi-search text-muted" />
-              <input
-                className="form-control"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search admin, action, target, IP..."
-              />
-            </div>
-
-            <select
-              className="form-select activity-risk-select"
-              value={filterRisk}
-              onChange={(e) => setFilterRisk(e.target.value)}
-            >
-              <option value="all">All Risk</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-              <option value="blocked">Blocked</option>
-            </select>
-          </div>
-
-          <div className="table-responsive activity-table-wrap">
-            <table className="table align-middle mb-0 activity-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Admin</th>
-                  <th>Risk</th>
-                  <th>Action</th>
-                  <th>Target</th>
-                  <th>IP</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {visibleLogs.map((item, index) => {
-                  const level = riskLevel(item.action, item.target)
-
-                  return (
-                    <tr key={`${item.created_at}-${index}`}>
-                      <td className="font-monospace text-muted">{fmtTime(item.created_at)}</td>
-                      <td>{compactText(item.username)}</td>
-                      <td>
-                        <span className={`risk-chip ${level}`}>
-                          {riskLabel(level)}
-                        </span>
-                      </td>
-<                       td className="font-monospace">{compactText(item.action)}</td>                      <td className="activity-target" title={item.target || ''}>
-                        {formatAuditTarget(item)}
-                    </td>
-                      <td className="font-monospace text-muted activity-ip" title={item.ip || ''}>
-                        {compactText(item.ip)}
-                      </td>
-                    </tr>
-                  )
-                })}
-
-                {!visibleLogs.length && (
-                  <tr>
-                    <td colSpan="6" className="text-center text-muted py-4">
-                      Tidak ada audit log.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+      {tab === 'summary' ? (
+        <section className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+          <Stat label="Actions" value={summary.total_actions} hint="Log terbaru" />
+          <Stat label="Admins" value={summary.active_admins} hint="Aktif" />
+          <Stat label="Commands" value={summary.commands} hint="Console/API" />
+          <Stat label="Server" value={summary.server_actions} hint="Start/restart" />
+          <Stat label="Files" value={summary.file_actions} hint="File access" />
+          <Stat label="Failed" value={summary.failed_login} hint="Login gagal" />
         </section>
+      ) : null}
 
-        <aside className="panel-card activity-session-panel">
-          <div className="activity-section-head">
+      {tab === 'logs' ? (
+        <section className="panel overflow-visible">
+          <div className="panel-head">
             <div>
-              <h3>Active Sessions</h3>
-              <p>Menampilkan {visibleSessions.length} dari {sessions.length} session</p>
+              <h3 className="panel-title">Audit Logs</h3>
+              <p className="panel-subtitle">Menampilkan {visibleLogs.length} dari {filteredLogs.length} hasil. Search tetap mengambil dari {logs.length} log terbaru.</p>
             </div>
           </div>
 
-          <div className="session-stack compact">
-            {visibleSessions.map((session) => (
-              <div className="session-item" key={session.token_hash}>
-                <div className="session-top">
-                  <div>
-                    <b>{session.username}</b>
-                    <small>{session.role}</small>
-                  </div>
-
-                  <span className="font-monospace text-muted">
-                    {shortHash(session.token_hash)}
-                  </span>
-                </div>
-
-                <div className="session-meta">
-                  <div>
-                    <span>IP</span>
-                    <b title={session.ip || ''}>{session.ip || '--'}</b>
-                  </div>
-
-                  <div>
-                    <span>Last seen</span>
-                    <b>{fmtTime(session.last_seen_at)}</b>
-                  </div>
-                </div>
-
-                <div className="session-agent" title={session.user_agent || ''}>
-                  {session.user_agent || 'Unknown device'}
-                </div>
-
-                <button
-                  className="btn btn-sm btn-danger-soft w-100 mt-2"
-                  onClick={() => revokeSession(session.token_hash, session.username)}
-                  disabled={busy === session.token_hash}
-                >
-                  {busy === session.token_hash ? 'Revoking...' : 'Revoke'}
-                </button>
-              </div>
-            ))}
-
-            {!visibleSessions.length && (
-              <div className="text-muted small">
-                Tidak ada session aktif.
-              </div>
-            )}
+          <div className="grid gap-2 border-b border-soft p-3 sm:grid-cols-[1fr_170px]">
+            <SearchBar value={query} onChange={setQuery} placeholder="Search admin, action, IP..." />
+            <SelectMenu
+              value={filterRisk}
+              onChange={setFilterRisk}
+              options={[
+                { value: 'all', label: 'All Risk' },
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'high', label: 'High' },
+                { value: 'critical', label: 'Critical' },
+                { value: 'blocked', label: 'Blocked' },
+              ]}
+            />
           </div>
-        </aside>
-      </div>
+
+          {visibleLogs.length ? (
+            <div className="divide-y divide-soft">
+              {visibleLogs.map((item, index) => {
+                const level = riskLevel(item.action, item.target)
+                return (
+                  <article key={`${item.created_at}-${index}`} className="grid grid-cols-1 gap-1 px-3.5 py-3 md:grid-cols-[128px_120px_90px_1fr_160px] md:items-center">
+                    <div className="font-mono text-xs text-faint">{fmtTime(item.created_at)}</div>
+                    <div className="truncate text-sm font-semibold text-textc">{item.username || '--'}</div>
+                    <span className={`w-fit rounded border px-2 py-0.5 font-mono text-[10px] ${riskClass(level)}`}>{level}</span>
+                    <div className="min-w-0 truncate text-sm text-dim" title={item.target || ''}>{formatAuditTarget(item)}</div>
+                    <div className="truncate font-mono text-xs text-faint" title={item.ip || ''}>{item.ip || '--'}</div>
+                  </article>
+                )
+              })}
+            </div>
+          ) : (
+            <EmptyState title="Tidak ada audit log" desc="Tidak ada hasil untuk filter ini." />
+          )}
+        </section>
+      ) : null}
+
+      {tab === 'sessions' ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="panel-title">Active Sessions</h3>
+              <p className="panel-subtitle">{sessions.length} session aktif. Layout dibuat grid agar user-agent tidak memotong card.</p>
+            </div>
+          </div>
+
+          {sessions.length ? (
+            <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
+              {sessions.map((session) => (
+                <article className="min-w-0 rounded-panel border border-soft bg-raised p-3" key={session.token_hash}>
+                  <div className="flex min-w-0 justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-textc">{session.username}</div>
+                      <div className="font-mono text-xs capitalize text-faint">{session.role}</div>
+                    </div>
+                    <div className="shrink-0 font-mono text-xs text-faint">{shortHash(session.token_hash)}</div>
+                  </div>
+
+                  <div className="mt-3 space-y-1 text-xs text-dim">
+                    <div className="grid grid-cols-[70px_1fr] gap-2"><span>IP</span><b className="min-w-0 truncate font-mono text-textc" title={session.ip || ''}>{session.ip || '--'}</b></div>
+                    <div className="grid grid-cols-[70px_1fr] gap-2"><span>Last</span><b className="min-w-0 truncate font-mono text-textc">{fmtTime(session.last_seen_at)}</b></div>
+                  </div>
+
+                  <div className="mt-3 max-h-16 overflow-auto rounded-panel border border-borderc bg-panel p-2 font-mono text-[11px] leading-5 text-faint" title={session.user_agent || ''}>{session.user_agent || 'Unknown device'}</div>
+
+                  <button className="btn btn-sm btn-danger mt-3 w-full" disabled={busy === session.token_hash} onClick={() => revokeSession(session.token_hash, session.username)}>
+                    {busy === session.token_hash ? 'Revoking...' : 'Revoke session'}
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Tidak ada session" desc="Tidak ada session aktif." />
+          )}
+        </section>
+      ) : null}
     </div>
   )
 }

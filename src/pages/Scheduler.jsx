@@ -1,21 +1,58 @@
-import React from "react"
-import { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { getJson, postJson } from '../api.js'
-import { LabeledInput } from '../components/FormFields.jsx'
+import EmptyState from '../components/EmptyState.jsx'
+import Icon from '../components/Icons.jsx'
+import PageHeader from '../components/PageHeader.jsx'
+import SelectMenu from '../components/SelectMenu.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
+
+const TASK_OPTIONS = [
+  { value: 'backup', label: 'Backup' },
+  { value: 'restart', label: 'Restart server' },
+  { value: 'command', label: 'Command' },
+  { value: 'broadcast', label: 'Broadcast message' },
+  { value: 'save_all', label: 'Save all' },
+  { value: 'shutdown', label: 'Shutdown' },
+]
+
+const PRESETS = [
+  ['Tiap 60 menit', 60],
+  ['Tiap 6 jam', 360],
+  ['Tiap 12 jam', 720],
+]
+
+function minutesToCron(minutes) {
+  const n = Math.max(1, Number(minutes || 60))
+  if (n < 60) return `*/${n} * * * *`
+  if (n % 1440 === 0) return '0 4 * * *'
+  if (n % 60 === 0) return `0 */${Math.max(1, n / 60)} * * *`
+  return `*/${Math.min(n, 59)} * * * *`
+}
+
+function jobSubtitle(job) {
+  return job.trigger || job.next_run || job.next_run_time || job.func || job.task_type || '--'
+}
 
 export default function Scheduler() {
   const toast = useToast()
   const [jobs, setJobs] = useState([])
-  const [form, setForm] = useState({ id: '', name: '', task_type: 'restart', cron: '' })
-  const [payload, setPayload] = useState('')
-  const [backupType, setBackupType] = useState('world')
+  const [form, setForm] = useState({
+    id: '',
+    name: '',
+    task_type: 'backup',
+    minutes: 60,
+    cron: '',
+    command: '',
+    message: '',
+    backup_type: 'world',
+  })
 
   const load = useCallback(async () => {
     try {
-      setJobs((await getJson('/api/scheduler')).jobs || [])
+      const data = await getJson('/api/scheduler')
+      setJobs(Array.isArray(data.jobs) ? data.jobs : [])
     } catch (e) {
-      toast(e.message, 'danger')
+      toast(e.message || 'Gagal memuat scheduler.', 'danger')
     }
   }, [toast])
 
@@ -23,112 +60,144 @@ export default function Scheduler() {
     load()
   }, [load])
 
-  async function addJob() {
-    const kwargs = {}
-    if (form.task_type === 'broadcast') kwargs.message = payload
-    if (form.task_type === 'command') kwargs.command = payload
-    if (form.task_type === 'backup') kwargs.backup_type = backupType
+  const finalCron = useMemo(() => form.cron.trim() || minutesToCron(form.minutes), [form.cron, form.minutes])
 
-    const d = await postJson('/api/scheduler/add', { ...form, name: form.name || form.id, kwargs })
-    toast(d.message, d.success ? 'success' : 'danger')
-    if (d.success) load()
+  function patch(next) {
+    setForm((old) => ({ ...old, ...next }))
   }
 
-  async function removeJob(id) {
-    const d = await postJson('/api/scheduler/remove', { id })
-    toast(d.message, d.success ? 'success' : 'danger')
-    if (d.success) load()
+  async function add(e) {
+    e.preventDefault()
+
+    const id = form.id.trim()
+    if (!id) return toast('ID job wajib diisi.', 'danger')
+    if (form.task_type === 'command' && !form.command.trim()) return toast('Command wajib diisi.', 'danger')
+    if (form.task_type === 'broadcast' && !form.message.trim()) return toast('Pesan broadcast wajib diisi.', 'danger')
+
+    const kwargs = {
+      minutes: Number(form.minutes || 60),
+      command: form.command.trim(),
+      message: form.message.trim(),
+      backup_type: form.backup_type,
+    }
+
+    const payload = {
+      id,
+      name: form.name.trim() || id,
+      func: form.task_type,
+      task_type: form.task_type,
+      trigger: 'interval',
+      minutes: Number(form.minutes || 60),
+      cron: finalCron,
+      kwargs,
+      command: form.command.trim(),
+      message: form.message.trim(),
+    }
+
+    try {
+      const data = await postJson('/api/scheduler/add', payload)
+      toast(data.message || 'Job ditambahkan.', data.success === false ? 'danger' : 'success')
+      if (data.success !== false) {
+        setForm({ id: '', name: '', task_type: 'backup', minutes: 60, cron: '', command: '', message: '', backup_type: 'world' })
+        load()
+      }
+    } catch (err) {
+      toast(err.message || 'Gagal menambah job.', 'danger')
+    }
+  }
+
+  async function remove(id) {
+    if (!window.confirm(`Hapus job ${id}?`)) return
+    try {
+      const data = await postJson('/api/scheduler/remove', { id })
+      toast(data.message || 'Job dihapus.', data.success === false ? 'danger' : 'success')
+      if (data.success !== false) load()
+    } catch (e) {
+      toast(e.message || 'Gagal hapus job.', 'danger')
+    }
   }
 
   return (
-    <div className="row g-4">
-      <div className="col-md-4">
-        <div className="card h-100">
-          <div className="card-header border-0 pb-0 pt-4 px-4 text-muted">
-            <i className="bi bi-plus-circle me-2" />Add Task
+    <div className="space-y-3">
+      <PageHeader eyebrow="Scheduler" title="Task Scheduler" desc="Atur backup, restart, broadcast, atau command terjadwal." actions={<button className="btn" onClick={load}><Icon name="refresh" className="h-3.5 w-3.5" />Refresh</button>} />
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="panel-title">Jobs</h3>
+              <p className="panel-subtitle">Daftar task yang sedang aktif.</p>
+            </div>
+            <span className="chip">{jobs.length}</span>
           </div>
 
-          <div className="card-body px-4 pt-3 pb-4">
-            <LabeledInput label="Task ID" value={form.id} onChange={(v) => setForm({ ...form, id: v })} placeholder="daily_restart" />
-            <LabeledInput label="Display Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="Daily Restart" />
+          {jobs.length ? (
+            <div className="divide-y divide-soft">
+              {jobs.map((job) => (
+                <article key={job.id} className="flex flex-col gap-2 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-textc">{job.name || job.id}</div>
+                    <div className="truncate font-mono text-xs text-faint">{job.id} · {jobSubtitle(job)}</div>
+                    {job.next_run || job.next_run_time ? <div className="mt-1 text-xs text-dim">Next: {job.next_run || job.next_run_time}</div> : null}
+                  </div>
+                  <button className="btn btn-sm btn-danger shrink-0" onClick={() => remove(job.id)}><Icon name="trash" className="h-3.5 w-3.5" />Remove</button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Belum ada job" desc="Tambahkan job di panel kanan." />
+          )}
+        </section>
 
-            <label className="form-label small text-muted fw-medium">Action Type</label>
-            <select className="form-select mb-3" value={form.task_type} onChange={(e) => setForm({ ...form, task_type: e.target.value })}>
-              <option value="restart">Restart Server</option>
-              <option value="save_all">Save All</option>
-              <option value="broadcast">Broadcast Message</option>
-              <option value="backup">Backup</option>
-              <option value="command">Execute Command</option>
-              <option value="shutdown">Shutdown</option>
-            </select>
+        <form onSubmit={add} className="panel h-fit">
+          <div className="panel-head">
+            <div>
+              <h3 className="panel-title">Tambah job</h3>
+              <p className="panel-subtitle">Command punya kolom payload sendiri.</p>
+            </div>
+          </div>
 
-            {['broadcast', 'command'].includes(form.task_type) && (
-              <LabeledInput
-                label={form.task_type === 'broadcast' ? 'Message Payload' : 'Command Payload'}
-                value={payload}
-                onChange={setPayload}
-                placeholder={form.task_type === 'broadcast' ? 'Server restart sebentar!' : 'say Hello'}
-              />
-            )}
+          <div className="space-y-3 p-3">
+            <label className="block"><span className="mb-1 block text-xs font-semibold text-dim">ID</span><input className="input" placeholder="night_message" value={form.id} onChange={(e) => patch({ id: e.target.value })} /></label>
+            <label className="block"><span className="mb-1 block text-xs font-semibold text-dim">Nama</span><input className="input" placeholder="Pesan malam" value={form.name} onChange={(e) => patch({ name: e.target.value })} /></label>
 
-            {form.task_type === 'backup' && (
-              <>
-                <label className="form-label small text-muted fw-medium">Backup Scope</label>
-                <select className="form-select mb-3" value={backupType} onChange={(e) => setBackupType(e.target.value)}>
-                  <option value="world">World Only</option>
-                  <option value="plugins">Plugins Only</option>
-                  <option value="full">Full Server</option>
-                </select>
-              </>
-            )}
-
-            <LabeledInput label="Cron Expression (m h d M w)" value={form.cron} onChange={(v) => setForm({ ...form, cron: v })} placeholder="0 4 * * *" />
-
-            <div className="mt-2 mb-4 d-flex gap-2 flex-wrap">
-              <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => setForm({ ...form, cron: '0 4 * * *' })}>Daily 4AM</button>
-              <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => setForm({ ...form, cron: '0 */6 * * *' })}>Every 6h</button>
-              <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => setForm({ ...form, cron: '0 0 * * 0' })}>Weekly</button>
+            <div>
+              <span className="mb-1 block text-xs font-semibold text-dim">Task</span>
+              <SelectMenu value={form.task_type} onChange={(value) => patch({ task_type: value })} options={TASK_OPTIONS} />
             </div>
 
-            <button className="btn btn-primary w-100" onClick={addJob}>Submit Job</button>
-          </div>
-        </div>
-      </div>
+            {form.task_type === 'command' ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-dim">Command</span>
+                <textarea className="input min-h-20 font-mono text-xs leading-6" placeholder="say halo gaesss, waktunya tidurrr woy" value={form.command} onChange={(e) => patch({ command: e.target.value })} />
+                <span className="mt-1 block text-[11px] text-faint">Tulis command tanpa slash. Contoh: <b>say halo gaesss</b></span>
+              </label>
+            ) : null}
 
-      <div className="col-md-8">
-        <div className="card h-100">
-          <div className="card-header border-0 pb-0 pt-4 px-4 d-flex justify-content-between align-items-center">
-            <span className="text-muted"><i className="bi bi-list-task me-2" />Active Jobs</span>
-            <button className="btn btn-sm btn-outline-secondary px-2 py-1" onClick={load}><i className="bi bi-arrow-clockwise" /></button>
-          </div>
+            {form.task_type === 'broadcast' ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-dim">Pesan broadcast</span>
+                <textarea className="input min-h-20" placeholder="Server restart 5 menit lagi!" value={form.message} onChange={(e) => patch({ message: e.target.value })} />
+              </label>
+            ) : null}
 
-          <div className="card-body px-0 pt-3">
-            <table className="table mb-0">
-              <thead>
-                <tr><th className="ps-4">ID / Name</th><th>Cron Trigger</th><th>Next Run</th><th className="text-end pe-4">Action</th></tr>
-              </thead>
-              <tbody>
-                {jobs.length ? (
-                  jobs.map((j) => (
-                    <tr key={j.id}>
-                      <td className="ps-4">
-                        <div className="fw-medium text-light">{j.name}</div>
-                        <div className="font-monospace text-muted" style={{ fontSize: '.7rem' }}>{j.id}</div>
-                      </td>
-                      <td><span className="badge bg-transparent border text-muted font-monospace" style={{ borderColor: 'var(--border)' }}>{j.trigger}</span></td>
-                      <td className="small text-muted">{j.next_run}</td>
-                      <td className="text-end pe-4">
-                        <button className="btn btn-sm btn-outline-secondary text-danger py-1 px-2" onClick={() => removeJob(j.id)}><i className="bi bi-x-lg" /></button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr><td colSpan="4" className="text-center text-muted py-5 small">Belum ada cron job terjadwal.</td></tr>
-                )}
-              </tbody>
-            </table>
+            {form.task_type === 'backup' ? (
+              <div>
+                <span className="mb-1 block text-xs font-semibold text-dim">Backup scope</span>
+                <SelectMenu value={form.backup_type} onChange={(value) => patch({ backup_type: value })} options={[{ value: 'world', label: 'World only' }, { value: 'plugins', label: 'Plugins only' }, { value: 'full', label: 'Full server' }]} />
+              </div>
+            ) : null}
+
+            <label className="block"><span className="mb-1 block text-xs font-semibold text-dim">Interval menit</span><input className="input font-mono" type="number" min="1" value={form.minutes} onChange={(e) => patch({ minutes: e.target.value })} /></label>
+            <label className="block"><span className="mb-1 block text-xs font-semibold text-dim">Cron optional</span><input className="input font-mono" placeholder={minutesToCron(form.minutes)} value={form.cron} onChange={(e) => patch({ cron: e.target.value })} /><span className="mt-1 block font-mono text-[11px] text-faint">Dipakai: {finalCron}</span></label>
+
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS.map(([label, minutes]) => <button key={label} type="button" className="btn btn-sm" onClick={() => patch({ minutes, cron: '' })}>{label}</button>)}
+            </div>
+
+            <button className="btn btn-accent w-full"><Icon name="plus" className="h-3.5 w-3.5" />Tambah</button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   )

@@ -1,18 +1,17 @@
-import React from "react"
-export default function Modal({ open, onClose, title, children, size = '' }) {
-  if (!open) return null
-
+import React from 'react'
+import Icon from './Icons.jsx'
+export default function Modal({ title, children, footer, onClose, size = 'md' }) {
+  const width = size === 'lg' ? 'max-w-3xl' : size === 'xl' ? 'max-w-5xl' : 'max-w-lg'
   return (
-    <div className="modal-backdrop-x" onMouseDown={onClose}>
-      <div className={`modal-panel-x ${size}`} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="d-flex justify-content-between align-items-center p-3 border-bottom" style={{ borderColor: 'var(--border)' }}>
-          <h6 className="m-0 fw-semibold">{title}</h6>
-          <button className="btn btn-sm btn-outline-secondary border-0" onClick={onClose}>
-            <i className="bi bi-x-lg" />
-          </button>
+    <div className="fixed inset-0 z-[1800] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+      <section className={`panel w-full ${width}`} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="panel-head">
+          <h3 className="panel-title">{title}</h3>
+          <button className="btn btn-icon" onClick={onClose}><Icon name="x" /></button>
         </div>
-        {children}
-      </div>
+        <div className="p-3 sm:p-4">{children}</div>
+        {footer ? <div className="flex justify-end gap-2 border-t border-soft p-3 sm:p-4">{footer}</div> : null}
+      </section>
     </div>
   )
 }

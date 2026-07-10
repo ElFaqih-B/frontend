@@ -1,30 +1,11 @@
 import React from 'react'
-
-export default function SearchBar({
-  value,
-  onChange,
-  placeholder = 'Search',
-  className = '',
-  right = null,
-}) {
-  const id = React.useId()
-
+import Icon from './Icons.jsx'
+export default function SearchBar({ value, onChange, placeholder = 'Search...', className = '' }) {
   return (
-    <div className={`search-shell ${className}`}>
-      <label className="search-icon" htmlFor={id}>Search</label>
-      <input
-        id={id}
-        className="search-input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
-      {value ? (
-        <button type="button" className="search-clear" onClick={() => onChange('')}>
-          Clear
-        </button>
-      ) : null}
-      {right ? <div className="search-right">{right}</div> : null}
-    </div>
+    <label className={`flex min-h-[34px] min-w-0 items-center gap-2 rounded-panel border border-borderc bg-raised px-2.5 ${className}`}>
+      <Icon name="search" className="h-3.5 w-3.5 shrink-0 text-faint" />
+      <input className="min-w-0 flex-1 bg-transparent text-[12.5px] text-textc outline-none placeholder:text-faint" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      {value ? <button type="button" className="text-faint hover:text-textc" onClick={() => onChange('')}>×</button> : null}
+    </label>
   )
 }

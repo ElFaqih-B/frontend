@@ -1,14 +1,13 @@
 import React from 'react'
-
-export default function PageHeader({ eyebrow, title, description, actions = null }) {
+export default function PageHeader({ eyebrow, title, desc, actions }) {
   return (
-    <div className="page-head">
-      <div className="page-head-main">
-        {eyebrow ? <div className="page-eyebrow">{eyebrow}</div> : null}
-        <h1 className="page-title">{title}</h1>
-        {description ? <p className="page-desc">{description}</p> : null}
+    <header className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        {eyebrow ? <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-faint">{eyebrow}</div> : null}
+        <h1 className="m-0 truncate text-xl font-semibold tracking-[-0.02em] text-textc sm:text-[22px]">{title}</h1>
+        {desc ? <p className="mt-1 max-w-2xl text-sm text-dim">{desc}</p> : null}
       </div>
-      {actions ? <div className="page-actions">{actions}</div> : null}
-    </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </header>
   )
 }

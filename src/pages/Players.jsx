@@ -1,101 +1,60 @@
 import React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getJson, postJson } from '../api.js'
+import EmptyState from '../components/EmptyState.jsx'
+import Icon from '../components/Icons.jsx'
+import Modal from '../components/Modal.jsx'
+import SearchBar from '../components/SearchBar.jsx'
+import SelectMenu from '../components/SelectMenu.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-import { formatPosition, normalizePlayer } from '../utils/players.js'
+import { formatFood, formatHealth, formatPosition, normalizePlayer, searchablePlayerText, sortPlayers } from '../utils/players.js'
 
-function getRole(player) {
-  const raw = String(
-    player?.role ||
-      player?.rank ||
-      player?.group ||
-      player?.primary_group ||
-      player?.permission_group ||
-      ''
-  ).toLowerCase()
+function normalizeRows(data) {
+  const source = Array.isArray(data?.players)
+    ? data.players
+    : Array.isArray(data?.names)
+      ? data.names
+      : []
+  return source.map(normalizePlayer).filter((p) => p.name)
+}
 
+function roleLabel(player) {
+  const raw = String(player?.role || '').toLowerCase()
+  if (raw.includes('owner') || raw.includes('admin') || raw.includes('operator') || raw === 'op') return 'Owner'
   if (player?.is_op || player?.op || player?.operator) return 'Owner'
-
-  if (
-    raw.includes('owner') ||
-    raw.includes('admin') ||
-    raw.includes('operator') ||
-    raw === 'op'
-  ) {
-    return 'Owner'
-  }
-
   return 'Member'
 }
 
 function roleClass(player) {
-  return getRole(player) === 'Owner' ? 'role-owner' : 'role-member'
+  return roleLabel(player) === 'Owner'
+    ? 'border-[#a970ff]/50 bg-[#a970ff]/10 text-[#caa7ff]'
+    : 'border-green/40 bg-green/10 text-green'
 }
 
-function val(value) {
-  if (value === null || value === undefined || value === '') return '--'
-  return value
-}
-
-function intVal(value) {
-  if (value === null || value === undefined || value === '') return '--'
-  const n = Number(value)
-  if (Number.isNaN(n)) return '--'
-  return Math.round(n)
-}
-
-function normalizeRows(data) {
-  const source = Array.isArray(data.players)
-    ? data.players
-    : Array.isArray(data.names)
-      ? data.names
-      : []
-
-  return source
-    .map(normalizePlayer)
-    .filter((p) => p.name)
-    .map((p) => ({
-      ...p,
-      role: getRole(p),
-      status: 'Online',
-    }))
-}
-
-function comparePlayer(a, b, key) {
-  if (key === 'role') {
-    const order = { Owner: 0, Member: 1 }
-    return (order[a.role] ?? 99) - (order[b.role] ?? 99)
-  }
-
-  if (key === 'health' || key === 'food' || key === 'level') {
-    return Number(a[key] ?? -1) - Number(b[key] ?? -1)
-  }
-
-  if (key === 'position') {
-    return formatPosition(a.position).localeCompare(formatPosition(b.position))
-  }
-
-  return String(a[key] ?? '').localeCompare(String(b[key] ?? ''))
+function MiniMetric({ label, value }) {
+  return (
+    <div className="rounded-panel border border-soft bg-panel px-2 py-1.5">
+      <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-faint">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-[12px] text-textc">{value || '-'}</div>
+    </div>
+  )
 }
 
 export default function Players() {
   const toast = useToast()
-
   const [players, setPlayers] = useState([])
-  const [raw, setRaw] = useState('')
-  const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState('role')
-  const [sortDir, setSortDir] = useState('asc')
+  const [query, setQuery] = useState('')
+  const [sortBy, setSortBy] = useState('name')
+  const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
 
   const loadPlayers = useCallback(async () => {
+    setLoading(true)
     try {
-      const data = await getJson('/api/players')
-      setPlayers(normalizeRows(data))
-      setRaw(data.raw || '')
+      setPlayers(normalizeRows(await getJson('/api/players')))
     } catch (e) {
-      toast(e.message || 'Gagal mengambil data player.', 'danger')
+      toast(e.message || 'Gagal memuat players', 'danger')
       setPlayers([])
     } finally {
       setLoading(false)
@@ -104,241 +63,168 @@ export default function Players() {
 
   useEffect(() => {
     loadPlayers()
-
     const id = setInterval(loadPlayers, 5000)
     return () => clearInterval(id)
   }, [loadPlayers])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = query.trim().toLowerCase()
+    const data = q ? players.filter((p) => searchablePlayerText(p).includes(q)) : players
+    return sortPlayers(data, sortBy)
+  }, [players, query, sortBy])
 
-    let rows = [...players]
-
-    if (q) {
-      rows = rows.filter((p) => {
-        const haystack = [
-          p.name,
-          p.role,
-          p.status,
-          p.dimension,
-          formatPosition(p.position),
-        ]
-          .join(' ')
-          .toLowerCase()
-
-        return haystack.includes(q)
-      })
-    }
-
-    rows.sort((a, b) => {
-      const result = comparePlayer(a, b, sortBy)
-      return sortDir === 'asc' ? result : -result
-    })
-
-    return rows
-  }, [players, search, sortBy, sortDir])
-
-  async function runCommand(command, message) {
-    setBusy(command)
-
+  async function runCommand(player, command, label = command) {
+    if (!player?.name) return
+    const key = `${player.name}:${label}`
+    setBusy(key)
     try {
-      const result = await postJson('/api/command', { command })
-      toast(
-        result.message || result.response || result.output || message || 'Command dikirim.',
-        result.success === false ? 'danger' : 'success'
-      )
-
-      setTimeout(loadPlayers, 700)
+      const result = await postJson('/api/command', { command: command.replaceAll('{player}', player.name) })
+      toast(result.response || result.message || `${label} dikirim`, result.success === false ? 'danger' : 'success')
+      setTimeout(loadPlayers, 800)
     } catch (e) {
-      toast(e.message || 'Gagal menjalankan command.', 'danger')
+      toast(e.message || `${label} gagal`, 'danger')
     } finally {
       setBusy('')
     }
   }
 
-  function confirmCommand(question, command, message) {
+  function confirmRun(player, question, command, label) {
     if (!window.confirm(question)) return
-    runCommand(command, message)
+    runCommand(player, command, label)
   }
 
-  return (
-    <div className="players-page">
-      <div className="panel-card mb-3">
-        <div className="panel-head compact">
-          <div>
-            <h3>Players</h3>
-            <p>{players.length} online</p>
-          </div>
+  const quickActions = [
+    ['Heal', 'heal {player}'],
+    ['Feed', 'feed {player}'],
+    ['Survival', 'gamemode survival {player}'],
+    ['Creative', 'gamemode creative {player}'],
+  ]
 
-          <button className="btn btn-sm btn-soft" onClick={loadPlayers} disabled={loading}>
-            <i className={`bi ${loading ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'} me-1`} />
+  const moreActions = [
+    ['Kill', 'kill {player}', true],
+    ['Kick', 'kick {player}', true],
+    ['OP', 'op {player}', false],
+    ['DeOP', 'deop {player}', false],
+    ['Ban', 'ban {player}', true],
+    ['Pardon', 'pardon {player}', false],
+    ['Whitelist Add', 'whitelist add {player}', false],
+    ['Whitelist Remove', 'whitelist remove {player}', false],
+  ]
+
+  return (
+    <div className="space-y-3">
+      <section className="panel">
+        <div className="flex flex-col gap-3 border-b border-soft p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="truncate text-[15px] font-semibold text-textc">Players</h2>
+            <p className="mt-0.5 text-xs text-faint">{players.length} online · {filtered.length} ditampilkan · update otomatis</p>
+          </div>
+          <button className="btn btn-sm shrink-0" onClick={loadPlayers} disabled={loading}>
+            <Icon name="refresh" className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
 
-        <div className="row g-2 align-items-center">
-          <div className="col-12 col-lg">
-            <div className="searchbar-wrap">
-              <i className="bi bi-search text-muted" />
-              <input
-                className="form-control"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari player, role, dimension, position..."
-              />
-
-              {search && (
-                <button className="btn btn-sm btn-soft" onClick={() => setSearch('')}>
-                  <i className="bi bi-x-lg" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="col-6 col-lg-auto">
-            <select className="form-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-              <option value="role">Sort: Role</option>
-              <option value="name">Sort: Name</option>
-              <option value="dimension">Sort: Dimension</option>
-              <option value="position">Sort: Position</option>
-              <option value="health">Sort: Health</option>
-              <option value="food">Sort: Food</option>
-              <option value="level">Sort: Level</option>
-            </select>
-          </div>
-
-          <div className="col-6 col-lg-auto">
-            <button
-              className="btn btn-soft w-100"
-              onClick={() => setSortDir((v) => (v === 'asc' ? 'desc' : 'asc'))}
-            >
-              <i className={`bi ${sortDir === 'asc' ? 'bi-sort-down' : 'bi-sort-up'} me-1`} />
-              {sortDir === 'asc' ? 'Asc' : 'Desc'}
-            </button>
-          </div>
+        <div className="grid grid-cols-1 gap-2 border-b border-soft p-3 sm:grid-cols-[minmax(0,1fr)_170px]">
+          <SearchBar value={query} onChange={setQuery} placeholder="Search nama, role, world, posisi..." />
+          <SelectMenu
+            value={sortBy}
+            onChange={setSortBy}
+            options={[
+              { value: 'name', label: 'Sort: Name' },
+              { value: 'role', label: 'Sort: Role' },
+              { value: 'dimension', label: 'Sort: World' },
+              { value: 'health', label: 'Sort: Health' },
+              { value: 'level', label: 'Sort: Level' },
+              { value: 'status', label: 'Sort: Status' },
+            ]}
+          />
         </div>
-      </div>
+      </section>
 
-      <div className="card overflow-hidden">
-        <div className="table-responsive">
-          <table className="table align-middle mb-0 players-table">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Dimension</th>
-                <th>Position</th>
-                <th>Health</th>
-                <th>Food</th>
-                <th>Level</th>
-                <th className="text-end">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filtered.map((p) => (
-                <tr key={p.name}>
-                  <td>
-                    <div className="player-name-only">{p.name}</div>
-                    <div className="player-mobile-meta">
-                      {val(p.dimension)} · {formatPosition(p.position)}
+      {filtered.length ? (
+        <section className="grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3">
+          {filtered.map((p) => {
+            const role = roleLabel(p)
+            return (
+              <article key={p.name} className="rounded-panel border border-soft bg-panel p-3">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-textc" title={p.name}>{p.name}</h3>
+                      <span className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] ${roleClass(p)}`}>{role}</span>
                     </div>
-                  </td>
 
-                  <td>
-                    <span className={`role-chip ${roleClass(p)}`}>
-                      {p.role}
-                    </span>
-                  </td>
-
-                  <td>
-                    <span className="online-chip">
-                      <span className="status-dot good" />
-                      Online
-                    </span>
-                  </td>
-
-                  <td className="hide-sm">{val(p.dimension)}</td>
-                  <td className="font-monospace text-muted hide-md">{formatPosition(p.position)}</td>
-                  <td className="font-monospace">{intVal(p.health)}</td>
-                  <td className="font-monospace hide-sm">{intVal(p.food)}</td>
-                  <td className="font-monospace hide-sm">{intVal(p.level)}</td>
-
-                  <td className="text-end">
-                    <div className="player-actions">
-                      <button
-                        className="btn btn-sm btn-soft"
-                        disabled={!!busy}
-                        title="Heal"
-                        onClick={() => runCommand(`effect give ${p.name} minecraft:instant_health 1 10 true`, `${p.name} di-heal.`)}
-                      >
-                        <i className="bi bi-heart-pulse" />
-                        <span>Heal</span>
-                      </button>
-
-                      <button
-                        className="btn btn-sm btn-soft"
-                        disabled={!!busy}
-                        title="Feed"
-                        onClick={() => runCommand(`effect give ${p.name} minecraft:saturation 5 5 true`, `${p.name} diberi saturation.`)}
-                      >
-                        <i className="bi bi-egg-fried" />
-                        <span>Feed</span>
-                      </button>
-
-                      <button
-                        className="btn btn-sm btn-soft"
-                        disabled={!!busy}
-                        title="Survival"
-                        onClick={() => runCommand(`gamemode survival ${p.name}`, `${p.name} ke survival.`)}
-                      >
-                        <i className="bi bi-tree" />
-                        <span>Surv</span>
-                      </button>
-
-                      <button
-                        className="btn btn-sm btn-soft"
-                        disabled={!!busy}
-                        title="Creative"
-                        onClick={() => runCommand(`gamemode creative ${p.name}`, `${p.name} ke creative.`)}
-                      >
-                        <i className="bi bi-hammer" />
-                        <span>Creat</span>
-                      </button>
-
-                      <button
-                        className="btn btn-sm btn-soft text-danger"
-                        disabled={!!busy}
-                        title="Kick"
-                        onClick={() => confirmCommand(`Kick ${p.name}?`, `kick ${p.name}`, `${p.name} dikick.`)}
-                      >
-                        <i className="bi bi-box-arrow-right" />
-                        <span>Kick</span>
-                      </button>
+                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-faint">
+                      <span className="inline-flex items-center gap-1 text-green"><span className="h-1.5 w-1.5 rounded-full bg-green" />Online</span>
+                      <span className="truncate">{p.dimension || '-'}</span>
+                      <span className="truncate">{p.ping ? `${p.ping}ms` : 'ping --'}</span>
                     </div>
-                  </td>
-                </tr>
-              ))}
+                  </div>
+                </div>
 
-              {!filtered.length && (
-                <tr>
-                  <td colSpan="9" className="text-center text-muted py-5">
-                    Tidak ada player online / tidak ada hasil pencarian.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                <div className="mt-3 truncate rounded-panel border border-soft bg-raised px-2.5 py-2 font-mono text-[11px] text-faint" title={formatPosition(p.position)}>
+                  Posisi: <span className="text-textc">{formatPosition(p.position)}</span>
+                </div>
 
-      {raw && (
-        <details className="panel-card mt-3">
-          <summary className="text-muted small">Raw player output</summary>
-          <pre className="small font-monospace text-muted mt-2 mb-0 overflow-auto">{raw}</pre>
-        </details>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  <MiniMetric label="HP" value={formatHealth(p.health)} />
+                  <MiniMetric label="Food" value={formatFood(p.food)} />
+                  <MiniMetric label="Level" value={p.level ?? '-'} />
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+                  {quickActions.map(([label, command]) => (
+                    <button
+                      key={label}
+                      className="btn btn-sm min-w-0 px-2"
+                      disabled={busy === `${p.name}:${label}`}
+                      onClick={() => runCommand(p, command, label)}
+                    >
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                  <button
+                    className="btn btn-sm btn-danger min-w-0 px-2"
+                    disabled={busy === `${p.name}:Kick`}
+                    onClick={() => confirmRun(p, `Kick ${p.name}?`, 'kick {player}', 'Kick')}
+                  >
+                    Kick
+                  </button>
+                  <button className="btn btn-sm min-w-0 px-2" onClick={() => setSelected(p)}>More</button>
+                </div>
+              </article>
+            )
+          })}
+        </section>
+      ) : (
+        <section className="panel">
+          <EmptyState title="Tidak ada player" desc="Tidak ada player online atau tidak ada hasil yang cocok dengan pencarian." />
+        </section>
       )}
+
+      {selected ? (
+        <Modal title={`Kelola ${selected.name}`} onClose={() => setSelected(null)}>
+          <div className="mb-3 rounded-panel border border-soft bg-raised p-3 text-sm text-dim">
+            <div className="truncate"><b className="text-textc">World:</b> {selected.dimension || '-'}</div>
+            <div className="truncate"><b className="text-textc">Position:</b> {formatPosition(selected.position)}</div>
+            <div><b className="text-textc">Health:</b> {formatHealth(selected.health)} · <b className="text-textc">Food:</b> {formatFood(selected.food)} · <b className="text-textc">Level:</b> {selected.level ?? '-'}</div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {moreActions.map(([label, command, dangerous]) => (
+              <button
+                key={label}
+                className={`btn btn-sm ${dangerous ? 'btn-danger' : ''}`}
+                disabled={busy === `${selected.name}:${label}`}
+                onClick={() => dangerous ? confirmRun(selected, `${label} ${selected.name}?`, command, label) : runCommand(selected, command, label)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }

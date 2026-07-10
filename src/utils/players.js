@@ -1,31 +1,10 @@
 export function normalizePlayer(player) {
   if (typeof player === 'string') {
-    return {
-      name: player,
-      valid: true,
-      role: 'Member',
-      health: null,
-      food: null,
-      level: null,
-      dimension: null,
-      position: null,
-      ping: null,
-      raw: player,
-    }
+    return { name: player, valid: true, role: 'Member', health: null, food: null, level: null, dimension: null, position: null, ping: null, raw: player }
   }
 
   if (player && typeof player === 'object') {
-    const role = player.role
-      || player.rank
-      || player.group
-      || player.primary_group
-      || player.primaryGroup
-      || player.permission_group
-      || player.permissionGroup
-      || player.lp_group
-      || player.lpGroup
-      || (player.is_op || player.op ? 'Owner' : 'Member')
-
+    const role = player.role || player.rank || player.group || player.primary_group || player.primaryGroup || player.permission_group || player.permissionGroup || player.lp_group || player.lpGroup || (player.is_op || player.op ? 'Owner' : 'Member')
     return {
       name: player.name || player.username || player.player || 'Unknown',
       valid: player.valid ?? true,
@@ -40,18 +19,7 @@ export function normalizePlayer(player) {
     }
   }
 
-  return {
-    name: String(player || 'Unknown'),
-    valid: false,
-    role: 'Unknown',
-    health: null,
-    food: null,
-    level: null,
-    dimension: null,
-    position: null,
-    ping: null,
-    raw: player,
-  }
+  return { name: String(player || 'Unknown'), valid: false, role: 'Unknown', health: null, food: null, level: null, dimension: null, position: null, ping: null, raw: player }
 }
 
 export function formatPosition(position) {
@@ -77,17 +45,7 @@ export function formatFood(value) {
 }
 
 export function searchablePlayerText(player) {
-  return [
-    player.name,
-    player.role,
-    player.dimension,
-    player.valid ? 'valid' : 'invalid',
-    formatPosition(player.position),
-    player.health,
-    player.food,
-    player.level,
-    player.ping,
-  ]
+  return [player.name, player.role, player.dimension, player.valid ? 'online' : 'invalid', formatPosition(player.position), player.health, player.food, player.level, player.ping]
     .filter((x) => x !== null && x !== undefined)
     .join(' ')
     .toLowerCase()
@@ -95,10 +53,8 @@ export function searchablePlayerText(player) {
 
 export function sortPlayers(players, sortBy) {
   const copy = [...players]
-
   const byName = (a, b) => a.name.localeCompare(b.name)
   const n = (v) => Number(v ?? -1)
-
   copy.sort((a, b) => {
     if (sortBy === 'role') return String(a.role || '').localeCompare(String(b.role || '')) || byName(a, b)
     if (sortBy === 'dimension') return String(a.dimension || '').localeCompare(String(b.dimension || '')) || byName(a, b)
@@ -107,6 +63,5 @@ export function sortPlayers(players, sortBy) {
     if (sortBy === 'status') return Number(b.valid) - Number(a.valid) || byName(a, b)
     return byName(a, b)
   })
-
   return copy
 }

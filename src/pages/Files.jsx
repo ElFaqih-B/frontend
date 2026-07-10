@@ -1,649 +1,255 @@
-import React from "react"
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiUrl, getJson, postForm, postJson } from '../api.js'
+import EmptyState from '../components/EmptyState.jsx'
+import Icon from '../components/Icons.jsx'
+import Modal from '../components/Modal.jsx'
+import SearchBar from '../components/SearchBar.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
 
-const TEXT_EXTENSIONS = new Set([
-  '.txt', '.yml', '.yaml', '.json', '.properties', '.toml', '.conf', '.cfg',
-  '.log', '.md', '.js', '.jsx', '.ts', '.tsx', '.css', '.html', '.xml',
-  '.sh', '.bat', '.py', '.java', '.env', '.ini'
-])
-
-const ICONS = {
-  folder: ['bi-folder-fill', 'file-c-folder'],
-  jar: ['bi-box-seam-fill', 'file-c-jar'],
-  zip: ['bi-file-earmark-zip-fill', 'file-c-zip'],
-  image: ['bi-file-earmark-image-fill', 'file-c-image'],
-  json: ['bi-braces', 'file-c-json'],
-  yaml: ['bi-diagram-3-fill', 'file-c-yaml'],
-  properties: ['bi-sliders', 'file-c-props'],
-  log: ['bi-terminal-fill', 'file-c-log'],
-  code: ['bi-file-earmark-code-fill', 'file-c-code'],
-  text: ['bi-file-earmark-text-fill', 'file-c-text'],
-  binary: ['bi-file-earmark-binary-fill', 'file-c-bin'],
+const COLOR_MAP = {
+  jar: 'text-[#c586c0]', json: 'text-[#dcdcaa]', yml: 'text-[#9cdcfe]', yaml: 'text-[#9cdcfe]', properties: 'text-[#ce9178]', log: 'text-[#b5cea8]', txt: 'text-[#d4d4d4]', js: 'text-[#dcdcaa]', jsx: 'text-[#dcdcaa]', py: 'text-[#4ec9b0]', md: 'text-[#569cd6]', zip: 'text-[#c586c0]', toml: 'text-[#9cdcfe]', ini: 'text-[#ce9178]'
 }
+const EDITABLE = new Set(['txt','yml','yaml','json','properties','cfg','conf','log','md','js','jsx','ts','tsx','py','toml','ini','env'])
 
-function extOf(item) {
-  const fromApi = item?.ext || ''
-  if (fromApi) return fromApi.toLowerCase()
-
-  const name = item?.name || ''
-  const idx = name.lastIndexOf('.')
-  return idx >= 0 ? name.slice(idx).toLowerCase() : ''
-}
-
-function fileIcon(item) {
-  if (item.is_dir) return ICONS.folder
-
-  const ext = extOf(item)
-
-  if (ext === '.jar') return ICONS.jar
-  if (ext === '.zip' || ext === '.rar' || ext === '.7z') return ICONS.zip
-  if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) return ICONS.image
-  if (ext === '.json') return ICONS.json
-  if (ext === '.yml' || ext === '.yaml') return ICONS.yaml
-  if (ext === '.properties' || ext === '.env' || ext === '.cfg' || ext === '.conf') return ICONS.properties
-  if (ext === '.log') return ICONS.log
-  if (['.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.css', '.html', '.xml', '.sh', '.bat'].includes(ext)) return ICONS.code
-  if (TEXT_EXTENSIONS.has(ext) || item.is_text) return ICONS.text
-
-  return ICONS.binary
-}
-
-function formatPath(path) {
-  if (!path) return '/'
-  return `/${path}`
-}
-
-function splitPath(path) {
-  return path.split('/').filter(Boolean)
-}
-
-function normalizePath(path) {
-  return String(path || '').replace(/^\/+/, '').replace(/\/+/g, '/')
-}
-
-function isConfigFile(item) {
-  const ext = extOf(item)
-  return ['.yml', '.yaml', '.json', '.properties', '.toml', '.conf', '.cfg', '.env'].includes(ext)
-}
-
-function lineCount(text) {
-  if (!text) return 1
-  return text.split('\n').length
-}
-
-function findMatches(content, query) {
-  if (!query.trim()) return []
-
-  const q = query.toLowerCase()
-  const lines = content.split('\n')
-  const result = []
-
-  lines.forEach((line, index) => {
-    const col = line.toLowerCase().indexOf(q)
-    if (col >= 0) {
-      result.push({
-        line: index + 1,
-        col: col + 1,
-        text: line,
-      })
-    }
-  })
-
-  return result
+function extOf(name = '') { return String(name).split('.').pop()?.toLowerCase() || '' }
+function fileColor(item) { if (item.is_dir || item.type === 'dir') return 'text-[#dcb67a]'; return COLOR_MAP[extOf(item.name || item.path)] || 'text-dim' }
+function parentPath(path) { const clean = String(path || '').replace(/\/+$/, ''); const i = clean.lastIndexOf('/'); return i <= 0 ? '' : clean.slice(0, i) }
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
+function highlightCode(text) {
+  let html = escapeHtml(text || '')
+  html = html.replace(/(#[^\n]*|\/\/[^\n]*)/g, '<span class="text-[#6a9955]">$1</span>')
+  html = html.replace(/(&quot;.*?&quot;|'.*?')/g, '<span class="text-[#ce9178]">$1</span>')
+  html = html.replace(/\b(true|false|null|None|ON|OFF|normal|easy|hard|survival|creative|adventure|spectator)\b/gi, '<span class="text-[#569cd6]">$1</span>')
+  html = html.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="text-[#b5cea8]">$1</span>')
+  html = html.replace(/^([\w.-]+)(\s*[:=])/gm, '<span class="text-[#9cdcfe]">$1</span>$2')
+  html = html.replace(/\b(function|const|let|var|return|import|from|export|async|await|def|class|if|else|for|while|try|catch)\b/g, '<span class="text-[#c586c0]">$1</span>')
+  return html
 }
 
 export default function Files() {
   const toast = useToast()
+  const fileRef = useRef(null)
 
-  const [curPath, setCurPath] = useState('')
+  const [path, setPath] = useState('')
   const [items, setItems] = useState([])
-  const [selected, setSelected] = useState(null)
+  const [query, setQuery] = useState('')
+  const [opened, setOpened] = useState(null)
   const [content, setContent] = useState('')
-  const [originalContent, setOriginalContent] = useState('')
-  const [ctx, setCtx] = useState(null)
+  const [dirty, setDirty] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [newModal, setNewModal] = useState(null)
+  const [renameItem, setRenameItem] = useState(null)
 
-  const [fileSearch, setFileSearch] = useState('')
-  const [codeSearch, setCodeSearch] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const uploadRef = useRef(null)
-  const editorRef = useRef(null)
-
-  const dirty = selected?.is_text && content !== originalContent
-  const matches = useMemo(() => findMatches(content, codeSearch), [content, codeSearch])
-
-  const filteredItems = useMemo(() => {
-    const q = fileSearch.trim().toLowerCase()
-
-    const sorted = [...items].sort((a, b) => {
-      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
-      return String(a.name).localeCompare(String(b.name))
-    })
-
-    if (!q) return sorted
-
-    return sorted.filter((item) => {
-      const name = String(item.name || '').toLowerCase()
-      const path = String(item.path || '').toLowerCase()
-      return name.includes(q) || path.includes(q)
-    })
-  }, [items, fileSearch])
-
-  const loadDir = useCallback(async (p = curPath) => {
-    setLoading(true)
-
+  const load = useCallback(async (nextPath = path) => {
+    setBusy(true)
     try {
-      const clean = normalizePath(p)
-      const d = await getJson(`/api/files/list?path=${encodeURIComponent(clean)}`)
-
-      setCurPath(clean)
-      setItems(d.items || [])
-      setSelected(null)
-      setContent('')
-      setOriginalContent('')
-      setCodeSearch('')
-      setCtx(null)
+      const clean = nextPath || ''
+      const data = await getJson(`/api/files/list?path=${encodeURIComponent(clean)}`)
+      setItems(Array.isArray(data.items) ? data.items : [])
+      setPath(clean)
     } catch (e) {
-      toast(e.message, 'danger')
+      toast(e.message || 'Gagal membuka folder.', 'danger')
     } finally {
-      setLoading(false)
+      setBusy(false)
     }
-  }, [curPath, toast])
+  }, [path, toast])
 
   useEffect(() => {
-    loadDir('')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load('')
   }, [])
 
-  async function openFile(item) {
-    setCtx(null)
-    setSelected(item)
-    setCodeSearch('')
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return items
+    return items.filter((item) => [item.name, item.path, item.type].join(' ').toLowerCase().includes(q))
+  }, [items, query])
 
-    if (item.is_text) {
-      try {
-        const d = await getJson(`/api/files/read?path=${encodeURIComponent(item.path)}`)
+  async function openItem(item) {
+    if (item.is_dir || item.type === 'dir') {
+      load(item.path)
+      return
+    }
 
-        if (d.success) {
-          setContent(d.content || '')
-          setOriginalContent(d.content || '')
-        } else {
-          setContent('')
-          setOriginalContent('')
-          toast(d.content || 'Gagal membaca file.', 'danger')
-        }
-      } catch (e) {
-        setContent('')
-        setOriginalContent('')
-        toast(e.message, 'danger')
-      }
-    } else {
-      setContent('')
-      setOriginalContent('')
+    const ext = extOf(item.name || item.path)
+    if (!EDITABLE.has(ext)) {
+      window.open(apiUrl(`/api/files/download?path=${encodeURIComponent(item.path)}`), '_blank')
+      return
+    }
+
+    try {
+      const data = await getJson(`/api/files/read?path=${encodeURIComponent(item.path)}`)
+      setOpened(item)
+      setContent(data.content || '')
+      setDirty(false)
+      setEditMode(false)
+    } catch (e) {
+      toast(e.message || 'Gagal membaca file.', 'danger')
     }
   }
 
   async function saveFile() {
-    if (!selected || !selected.is_text) return
+    if (!opened) return
+    try {
+      const data = await postJson('/api/files/write', { path: opened.path, content })
+      toast(data.message || 'File disimpan.', data.success === false ? 'danger' : 'success')
+      setDirty(false)
+      setEditMode(false)
+      load(path)
+    } catch (e) {
+      toast(e.message || 'Gagal menyimpan file.', 'danger')
+    }
+  }
 
-    setSaving(true)
+  async function createItem(e) {
+    e.preventDefault()
+    const name = e.currentTarget.name.value.trim()
+    if (!name) return
 
     try {
-      const d = await postJson('/api/files/write', {
-        path: selected.path,
-        content,
-      })
-
-      toast(d.message || 'File disimpan.', d.success ? 'success' : 'danger')
-
-      if (d.success) {
-        setOriginalContent(content)
-        loadDir(curPath)
-      }
-    } catch (e) {
-      toast(e.message, 'danger')
-    } finally {
-      setSaving(false)
+      const bodyPath = path ? `${path}/${name}` : name
+      const data = newModal === 'folder'
+        ? await postJson('/api/files/mkdir', { path: bodyPath })
+        : await postJson('/api/files/write', { path: bodyPath, content: '' })
+      toast(data.message || 'Item dibuat.', data.success === false ? 'danger' : 'success')
+      setNewModal(null)
+      load(path)
+    } catch (err) {
+      toast(err.message || 'Gagal membuat item.', 'danger')
     }
   }
 
-  function goUp() {
-    const parts = splitPath(curPath)
-    parts.pop()
-    loadDir(parts.join('/'))
-  }
-
-  function jumpToBreadcrumb(index) {
-    const parts = splitPath(curPath)
-    const next = parts.slice(0, index + 1).join('/')
-    loadDir(next)
-  }
-
-  async function newFolder() {
-    const name = window.prompt('Nama folder:')
-    if (!name) return
-
-    const d = await postJson('/api/files/mkdir', {
-      path: curPath,
-      name,
-    })
-
-    toast(d.message, d.success ? 'success' : 'danger')
-    if (d.success) loadDir(curPath)
-  }
-
-  async function newFile() {
-    const name = window.prompt('Nama file:')
-    if (!name) return
-
-    const path = normalizePath(`${curPath}/${name}`)
-
-    const d = await postJson('/api/files/write', {
-      path,
-      content: '',
-    })
-
-    toast(d.message, d.success ? 'success' : 'danger')
-    if (d.success) loadDir(curPath)
-  }
-
-  async function uploadFiles() {
-    const files = uploadRef.current?.files
-    if (!files?.length) return
+  async function upload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
 
     const fd = new FormData()
-    fd.append('path', curPath)
-    Array.from(files).forEach((f) => fd.append('files', f))
+    fd.append('path', path || '')
+    fd.append('files', file)
+    fd.append('file', file)
 
-    const d = await postForm('/api/files/upload', fd)
-
-    toast(d.message, d.success ? 'success' : 'danger')
-
-    if (d.success) {
-      uploadRef.current.value = ''
-      loadDir(curPath)
+    try {
+      const data = await postForm('/api/files/upload', fd)
+      toast(data.message || 'Upload berhasil.', data.success === false ? 'danger' : 'success')
+      load(path)
+    } catch (err) {
+      toast(err.message || 'Upload gagal.', 'danger')
+    } finally {
+      e.target.value = ''
     }
   }
 
-  async function renameItem() {
-    const name = window.prompt('Nama baru:')
-    if (!name || !ctx) return
+  async function rename(e) {
+    e.preventDefault()
+    const name = e.currentTarget.name.value.trim()
+    if (!name || !renameItem) return
 
-    const d = await postJson('/api/files/rename', {
-      path: ctx.item.path,
-      new_name: name,
-    })
-
-    toast(d.message, d.success ? 'success' : 'danger')
-    setCtx(null)
-    if (d.success) loadDir(curPath)
-  }
-
-  async function deleteItem() {
-    if (!ctx) return
-    if (!window.confirm(`Hapus "${ctx.item.path}"?`)) return
-
-    const d = await postJson('/api/files/delete', {
-      path: ctx.item.path,
-    })
-
-    toast(d.message, d.success ? 'success' : 'danger')
-    setCtx(null)
-    if (d.success) loadDir(curPath)
-  }
-
-  async function compressItem() {
-    if (!ctx) return
-
-    const d = await postJson('/api/files/compress', {
-      path: ctx.item.path,
-    })
-
-    toast(d.message, d.success ? 'success' : 'danger')
-    setCtx(null)
-    if (d.success) loadDir(curPath)
-  }
-
-  async function extractItem() {
-    if (!ctx) return
-
-    const d = await postJson('/api/files/extract', {
-      path: ctx.item.path,
-    })
-
-    toast(d.message, d.success ? 'success' : 'danger')
-    setCtx(null)
-    if (d.success) loadDir(curPath)
-  }
-
-  function selectMatch(match) {
-    if (!editorRef.current) return
-
-    const lines = content.split('\n')
-    let index = 0
-
-    for (let i = 0; i < match.line - 1; i += 1) {
-      index += lines[i].length + 1
-    }
-
-    index += match.col - 1
-
-    editorRef.current.focus()
-    editorRef.current.setSelectionRange(index, index + codeSearch.length)
-  }
-
-  function onEditorKeyDown(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-      e.preventDefault()
-      saveFile()
-    }
-
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
-      e.preventDefault()
-      const el = document.getElementById('file-code-search')
-      el?.focus()
-    }
-
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      const textarea = e.currentTarget
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const next = `${content.substring(0, start)}  ${content.substring(end)}`
-      setContent(next)
-
-      requestAnimationFrame(() => {
-        textarea.selectionStart = start + 2
-        textarea.selectionEnd = start + 2
-      })
+    try {
+      const data = await postJson('/api/files/rename', { path: renameItem.path, new_name: name })
+      toast(data.message || 'Rename berhasil.', data.success === false ? 'danger' : 'success')
+      setRenameItem(null)
+      load(path)
+    } catch (err) {
+      toast(err.message || 'Rename gagal.', 'danger')
     }
   }
 
-  const breadcrumbParts = splitPath(curPath)
-  const selectedExt = selected ? extOf(selected) : ''
-  const selectedIsConfig = selected ? isConfigFile(selected) : false
+  async function del(item) {
+    if (!window.confirm(`Hapus ${item.name}?`)) return
+    try {
+      const data = await postJson('/api/files/delete', { path: item.path })
+      toast(data.message || 'File dihapus.', data.success === false ? 'danger' : 'success')
+      if (opened?.path === item.path) setOpened(null)
+      load(path)
+    } catch (err) {
+      toast(err.message || 'Delete gagal.', 'danger')
+    }
+  }
+
+  async function archive(action, item) {
+    try {
+      const data = await postJson(`/api/files/${action}`, { path: item.path })
+      toast(data.message || `${action} berhasil.`, data.success === false ? 'danger' : 'success')
+      load(path)
+    } catch (err) {
+      toast(err.message || `${action} gagal.`, 'danger')
+    }
+  }
 
   return (
-    <div className="files-workbench" onClick={() => setCtx(null)}>
-      <div className="files-titlebar">
-        <div className="files-title-left">
-          <button className="btn btn-soft btn-sm files-icon-btn" onClick={goUp} disabled={!curPath}>
-            <i className="bi bi-arrow-left" />
-          </button>
-
-          <button className="btn btn-soft btn-sm files-icon-btn" onClick={() => loadDir(curPath)} disabled={loading}>
-            <i className={`bi ${loading ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'}`} />
-          </button>
-
-          <div className="files-path">
-            <button className="files-crumb root" onClick={() => loadDir('')}>server</button>
-            {breadcrumbParts.map((part, index) => (
-              <React.Fragment key={`${part}-${index}`}>
-                <span className="files-sep">/</span>
-                <button className="files-crumb" onClick={() => jumpToBreadcrumb(index)}>
-                  {part}
-                </button>
-              </React.Fragment>
-            ))}
-          </div>
+    <div className="panel h-[calc(100vh-120px)] min-h-[620px] overflow-hidden">
+      <div className="flex h-12 items-center justify-between gap-3 border-b border-soft px-3">
+        <div className="flex min-w-0 items-center gap-2 font-mono text-xs text-dim">
+          <button className="btn btn-icon" onClick={() => load(parentPath(path))} title="Up">..</button>
+          <span className="truncate">/{path || ''}</span>
         </div>
-
-        <div className="files-title-actions">
-          <button className="btn btn-soft btn-sm" onClick={newFolder}>
-            <i className="bi bi-folder-plus me-1" />
-            Folder
-          </button>
-
-          <button className="btn btn-soft btn-sm" onClick={newFile}>
-            <i className="bi bi-file-earmark-plus me-1" />
-            File
-          </button>
-
-          <label className="btn btn-soft btn-sm mb-0">
-            <i className="bi bi-upload me-1" />
-            Upload
-            <input ref={uploadRef} type="file" multiple hidden onChange={uploadFiles} />
-          </label>
-
-          {selected?.is_text && (
-            <button className="btn btn-primary btn-sm" onClick={saveFile} disabled={saving || !dirty}>
-              <i className="bi bi-floppy me-1" />
-              {saving ? 'Saving...' : dirty ? 'Save' : 'Saved'}
-            </button>
-          )}
+        <div className="flex shrink-0 gap-1.5">
+          <input ref={fileRef} type="file" className="hidden" onChange={upload} />
+          <button className="btn btn-icon" onClick={() => setNewModal('folder')} title="New folder"><Icon name="folder" /></button>
+          <button className="btn btn-icon" onClick={() => setNewModal('file')} title="New file"><Icon name="plus" /></button>
+          <button className="btn btn-icon" onClick={() => fileRef.current?.click()} title="Upload"><Icon name="upload" /></button>
+          <button className="btn btn-icon" onClick={() => load(path)} title="Refresh" disabled={busy}><Icon name="refresh" /></button>
         </div>
       </div>
 
-      <div className="files-main">
-        <aside className="files-explorer">
-          <div className="files-explorer-head">
-            <div>
-              <div className="files-section-title">Explorer</div>
-              <div className="files-section-sub">{filteredItems.length} item</div>
-            </div>
-          </div>
-
-          <div className="files-search">
-            <i className="bi bi-search" />
-            <input
-              value={fileSearch}
-              onChange={(e) => setFileSearch(e.target.value)}
-              placeholder="Search files..."
-            />
-            {fileSearch && (
-              <button onClick={() => setFileSearch('')}>
-                <i className="bi bi-x" />
-              </button>
-            )}
-          </div>
-
-          <div className="files-tree">
-            {filteredItems.length ? (
-              filteredItems.map((item) => {
-                const [icon, colorClass] = fileIcon(item)
-                const active = selected?.path === item.path
-
-                return (
-                  <div
-                    key={item.path}
-                    className={`file-row ${active ? 'active' : ''} ${item.is_dir ? 'is-dir' : ''}`}
-                    onClick={() => item.is_dir ? loadDir(item.path) : openFile(item)}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setCtx({ x: e.clientX, y: e.clientY, item })
-                    }}
-                    title={item.path}
-                  >
-                    <i className={`bi ${icon} file-icon ${colorClass}`} />
-                    <span className="file-name">{item.name}</span>
-                    {!item.is_dir && <span className="file-size">{item.size}</span>}
-                  </div>
-                )
-              })
-            ) : (
-              <div className="files-empty-small">
-                <i className="bi bi-search" />
-                <span>Tidak ada file cocok.</span>
+      <div className="grid h-[calc(100%-48px)] grid-cols-1 md:grid-cols-[300px_1fr]">
+        <aside className="flex min-h-0 flex-col border-b border-soft md:border-b-0 md:border-r md:border-soft">
+          <div className="border-b border-soft p-2"><SearchBar value={query} onChange={setQuery} placeholder="Search files..." /></div>
+          <div className="min-h-0 flex-1 overflow-auto p-2">
+            {path ? <button className="mb-1 flex h-8 w-full items-center gap-2 rounded-panel px-2 text-left font-mono text-xs text-faint hover:bg-hover" onClick={() => load(parentPath(path))}>../</button> : null}
+            {filtered.length ? filtered.map((item) => (
+              <div key={item.path || item.name} className="group flex h-8 items-center gap-2 rounded-panel px-2 hover:bg-hover">
+                <button className={`min-w-0 flex-1 truncate text-left font-mono text-xs ${fileColor(item)}`} onClick={() => openItem(item)}>{item.is_dir || item.type === 'dir' ? '▸' : '•'} {item.name}</button>
+                <button className="hidden text-[11px] text-faint hover:text-textc group-hover:block" onClick={() => setRenameItem(item)}>rename</button>
+                <button className="hidden text-[11px] text-red group-hover:block" onClick={() => del(item)}>del</button>
               </div>
-            )}
+            )) : <EmptyState title="Kosong" desc="Folder kosong." />}
           </div>
         </aside>
 
-        <section className="files-editor">
-          <div className="files-editor-tabs">
-            {selected ? (
-              <div className={`files-tab ${dirty ? 'dirty' : ''}`}>
-                <i className={`bi ${fileIcon(selected)[0]} file-icon ${fileIcon(selected)[1]}`} />
-                <span>{selected.name}</span>
-                {dirty && <b />}
+        <main className="grid min-h-0 grid-rows-[auto_1fr]">
+          <div className="flex min-h-10 items-center justify-between gap-3 border-b border-soft px-3 py-2">
+            <div className="min-w-0 truncate font-mono text-xs text-dim">{opened ? opened.path : 'Pilih file untuk dibuka'}</div>
+            {opened ? (
+              <div className="flex gap-1.5">
+                <button className="btn btn-sm" onClick={() => setEditMode((v) => !v)}>{editMode ? 'Preview' : 'Edit'}</button>
+                <button className="btn btn-sm" disabled={!dirty} onClick={saveFile}><Icon name="save" className="h-3.5 w-3.5" />Save</button>
+                <button className="btn btn-sm" onClick={() => archive('compress', opened)}>Zip</button>
+                <button className="btn btn-sm" onClick={() => archive('extract', opened)}>Extract</button>
               </div>
+            ) : null}
+          </div>
+
+          {opened ? (
+            editMode ? (
+              <textarea
+                className="min-h-0 resize-none border-0 bg-[#090909] p-3 font-mono text-xs leading-6 text-[#d4d4d4] outline-none"
+                value={content}
+                onChange={(e) => { setContent(e.target.value); setDirty(true) }}
+                spellCheck="false"
+              />
             ) : (
-              <div className="files-tab muted">
-                <i className="bi bi-file-earmark" />
-                <span>No file selected</span>
-              </div>
-            )}
-
-            {selected?.is_text && (
-              <div className="files-code-tools">
-                <div className="files-code-search">
-                  <i className="bi bi-search" />
-                  <input
-                    id="file-code-search"
-                    value={codeSearch}
-                    onChange={(e) => setCodeSearch(e.target.value)}
-                    placeholder="Search in file..."
-                  />
-                  {codeSearch && (
-                    <button onClick={() => setCodeSearch('')}>
-                      <i className="bi bi-x" />
-                    </button>
-                  )}
-                </div>
-
-                <span className="files-code-counter">
-                  {codeSearch ? `${matches.length} match` : `${lineCount(content)} lines`}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="files-editor-body">
-            {!selected && (
-              <div className="files-empty">
-                <i className="bi bi-file-earmark-code" />
-                <div>Pilih file untuk diedit</div>
-                <small>Gunakan explorer kiri untuk membuka config, plugin file, atau log.</small>
-              </div>
-            )}
-
-            {selected?.is_text && (
-              <div className="files-code-layout">
-                <div className="files-gutter">
-                  {Array.from({ length: lineCount(content) }).map((_, index) => (
-                    <div key={index}>{index + 1}</div>
-                  ))}
-                </div>
-
-                <textarea
-                  ref={editorRef}
-                  id="editor"
-                  spellCheck="false"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  onKeyDown={onEditorKeyDown}
-                  className={selectedIsConfig ? 'is-config' : ''}
-                />
-              </div>
-            )}
-
-            {selected?.is_image && (
-              <div className="files-preview">
-                <img
-                  alt="preview"
-                  src={apiUrl(`/api/files/raw?path=${encodeURIComponent(selected.path)}`)}
-                />
-              </div>
-            )}
-
-            {selected && !selected.is_text && !selected.is_image && (
-              <div className="files-empty">
-                <i className="bi bi-file-earmark-binary" />
-                <div>Binary File</div>
-                <small>{selected.name} tidak bisa diedit sebagai teks.</small>
-
-                <a
-                  href={apiUrl(`/api/files/download?path=${encodeURIComponent(selected.path)}`)}
-                  className="btn btn-soft btn-sm mt-3"
-                >
-                  <i className="bi bi-download me-1" />
-                  Download
-                </a>
-              </div>
-            )}
-          </div>
-
-          {selected && (
-            <div className="files-statusbar">
-              <span>{formatPath(selected.path)}</span>
-              <span>{selectedExt || 'file'}</span>
-              {selected?.is_text && <span>{lineCount(content)} lines</span>}
-              {selected?.is_text && <span>{dirty ? 'Unsaved changes' : 'Saved'}</span>}
-            </div>
+              <pre className="min-h-0 overflow-auto bg-[#0c0c0c] p-3 font-mono text-xs leading-6 text-[#d4d4d4]">
+                <code dangerouslySetInnerHTML={{ __html: highlightCode(content) }} />
+              </pre>
+            )
+          ) : (
+            <EmptyState title="Tidak ada file terbuka" desc="Klik file di explorer untuk membaca. Gunakan tombol Edit kalau ingin mengubah file." />
           )}
-
-          {selected?.is_text && codeSearch && matches.length > 0 && (
-            <div className="files-search-results">
-              <div className="files-search-results-head">
-                Search results
-                <span>{matches.length}</span>
-              </div>
-
-              {matches.slice(0, 10).map((match) => (
-                <button
-                  key={`${match.line}-${match.col}-${match.text}`}
-                  onClick={() => selectMatch(match)}
-                >
-                  <span className="mono">L{match.line}</span>
-                  <span>{match.text.trim() || '(empty line)'}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
+        </main>
       </div>
 
-      {ctx && (
-        <div
-          className="ctx-menu vscode-ctx"
-          style={{ top: ctx.y, left: ctx.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="ctx-item" onClick={() => {
-            setCtx(null)
-            ctx.item.is_dir ? loadDir(ctx.item.path) : openFile(ctx.item)
-          }}>
-            <i className="bi bi-box-arrow-up-right text-muted" />
-            Open
-          </div>
+      {newModal ? (
+        <Modal title={newModal === 'folder' ? 'Folder baru' : 'File baru'} onClose={() => setNewModal(null)}>
+          <form onSubmit={createItem} className="space-y-3"><input name="name" className="input" placeholder={newModal === 'folder' ? 'nama_folder' : 'config.yml'} autoFocus /><button className="btn btn-accent w-full">Buat</button></form>
+        </Modal>
+      ) : null}
 
-          <div className="ctx-item" onClick={renameItem}>
-            <i className="bi bi-pencil text-muted" />
-            Rename
-          </div>
-
-          <div className="ctx-item text-danger" onClick={deleteItem}>
-            <i className="bi bi-trash" />
-            Delete
-          </div>
-
-          <a
-            className="ctx-item"
-            href={apiUrl(`/api/files/download?path=${encodeURIComponent(ctx.item.path)}`)}
-          >
-            <i className="bi bi-download text-muted" />
-            Download
-          </a>
-
-          <div className="ctx-separator" />
-
-          <div className="ctx-item" onClick={compressItem}>
-            <i className="bi bi-file-earmark-zip text-muted" />
-            Compress
-          </div>
-
-          {ctx.item.ext === '.zip' && (
-            <div className="ctx-item" onClick={extractItem}>
-              <i className="bi bi-box-arrow-down text-muted" />
-              Extract
-            </div>
-          )}
-        </div>
-      )}
+      {renameItem ? (
+        <Modal title={`Rename ${renameItem.name}`} onClose={() => setRenameItem(null)}>
+          <form onSubmit={rename} className="space-y-3"><input name="name" className="input" defaultValue={renameItem.name} autoFocus /><button className="btn btn-accent w-full">Rename</button></form>
+        </Modal>
+      ) : null}
     </div>
   )
 }

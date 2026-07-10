@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
 const PRESETS = [
-  ['#536b86', 'Slate'],
-  ['#607b9a', 'Steel'],
-  ['#577b5e', 'Moss'],
-  ['#8b6f4e', 'Tawny'],
-  ['#7a678f', 'Iris'],
-  ['#9a5f5f', 'Clay'],
+  ['#c96442', 'Clay'],
+  ['#7fb069', 'Moss'],
+  ['#6a9fb5', 'Blue'],
+  ['#c97fd4', 'Iris'],
+  ['#d7ba7d', 'Gold'],
+  ['#e5484d', 'Red'],
 ]
 
 const STORAGE_KEY = 'panel-accent'
@@ -19,50 +19,17 @@ function readAccent() {
   }
 }
 
-
-function clamp(n, min = 0, max = 255) {
-  return Math.max(min, Math.min(max, n))
-}
-
-function hexToRgb(hex) {
-  const clean = String(hex || '').replace('#', '').trim()
-  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return { r: 83, g: 107, b: 134 }
-  return {
-    r: parseInt(clean.slice(0, 2), 16),
-    g: parseInt(clean.slice(2, 4), 16),
-    b: parseInt(clean.slice(4, 6), 16),
-  }
-}
-
-function rgbToHex({ r, g, b }) {
-  return `#${[r, g, b].map((v) => clamp(Math.round(v)).toString(16).padStart(2, '0')).join('')}`
-}
-
-function mixWithWhite(rgb, amount = 0.11) {
-  return {
-    r: rgb.r + (255 - rgb.r) * amount,
-    g: rgb.g + (255 - rgb.g) * amount,
-    b: rgb.b + (255 - rgb.b) * amount,
-  }
-}
-
 function applyAccent(color) {
-  const rgb = hexToRgb(color)
-  const hover = rgbToHex(mixWithWhite(rgb, 0.11))
-
   document.documentElement.style.setProperty('--accent', color)
-  document.documentElement.style.setProperty('--accent-hover', hover)
-  document.documentElement.style.setProperty('--accent-alpha', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`)
-  document.documentElement.style.setProperty('--accent-alpha-soft', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.08)`)
-
   try {
     localStorage.setItem(STORAGE_KEY, color)
   } catch {}
 }
 
-
-export default function AccentPicker({ placement = 'inline' }) {
-  const [accent, setAccent] = useState(() => (typeof window === 'undefined' ? PRESETS[0][0] : readAccent()))
+export default function AccentPicker({ compact = false }) {
+  const [accent, setAccent] = useState(() => (
+    typeof window === 'undefined' ? PRESETS[0][0] : readAccent()
+  ))
 
   useEffect(() => {
     applyAccent(accent)
@@ -73,24 +40,61 @@ export default function AccentPicker({ placement = 'inline' }) {
     return hit ? hit[1] : 'Custom'
   }, [accent])
 
-  return (
-    <section className={`accent-picker accent-picker-${placement}`} aria-label="Accent color">
-      <div className="accent-picker-head">
-        <div>
-          <div className="accent-picker-label">Accent</div>
-          <div className="accent-picker-current">{activeName} · {accent}</div>
+  if (compact) {
+    return (
+      <div className="hidden items-center gap-1.5 rounded-panel border border-borderc bg-panel px-2 py-1.5 sm:flex" title={`Accent: ${activeName} ${accent}`}>
+        <span className="font-mono text-[11px] text-dim">aksen</span>
+        <div className="flex items-center gap-1">
+          {PRESETS.slice(0, 4).map(([color, name]) => (
+            <button
+              key={color}
+              type="button"
+              className={`h-4 w-4 rounded-full border ${accent.toLowerCase() === color.toLowerCase() ? 'border-textc ring-1 ring-textc' : 'border-white/10'}`}
+              style={{ background: color }}
+              title={`${name} ${color}`}
+              aria-label={`Set accent ${name}`}
+              onClick={() => setAccent(color)}
+            />
+          ))}
         </div>
-        <label className="color-input-wrap" aria-label="Custom accent color" title="Custom color">
-          <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} />
+        <label className="grid h-5 w-5 cursor-pointer place-items-center overflow-hidden rounded-full border border-borderc" style={{ background: accent }} title="Custom color">
+          <input
+            type="color"
+            value={accent}
+            onChange={(e) => setAccent(e.target.value)}
+            className="h-8 w-8 cursor-pointer opacity-0"
+            aria-label="Custom accent color"
+          />
+        </label>
+      </div>
+    )
+  }
+
+  return (
+    <section className="panel-pad">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-textc">Accent color</div>
+          <div className="font-mono text-xs text-faint">{activeName} · {accent}</div>
+        </div>
+
+        <label className="grid h-9 w-9 cursor-pointer place-items-center overflow-hidden rounded-panel border border-borderc" style={{ background: accent }} title="Custom color">
+          <input
+            type="color"
+            value={accent}
+            onChange={(e) => setAccent(e.target.value)}
+            className="h-12 w-12 cursor-pointer opacity-0"
+            aria-label="Custom accent color"
+          />
         </label>
       </div>
 
-      <div className="swatches">
+      <div className="grid grid-cols-6 gap-2">
         {PRESETS.map(([color, name]) => (
           <button
             key={color}
             type="button"
-            className={`swatch ${accent.toLowerCase() === color.toLowerCase() ? 'active' : ''}`}
+            className={`h-7 rounded-panel border ${accent.toLowerCase() === color.toLowerCase() ? 'border-textc ring-2 ring-[var(--accent-dim)]' : 'border-white/10'}`}
             style={{ background: color }}
             title={`${name} ${color}`}
             aria-label={`Set accent ${name}`}

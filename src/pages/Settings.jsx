@@ -1,194 +1,51 @@
-import React from 'react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { apiUrl, getJson, postForm, postJson } from '../api.js'
-import EmptyState from '../components/EmptyState.jsx'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { getJson, postForm, postJson } from '../api.js'
+import AccentPicker from '../components/AccentPicker.jsx'
+import Icon from '../components/Icons.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import SearchBar from '../components/SearchBar.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
 
-const IMPORTANT_KEYS = [
-  'motd',
-  'max-players',
-  'server-port',
-  'online-mode',
-  'white-list',
-  'difficulty',
-  'gamemode',
-  'pvp',
-  'view-distance',
-  'simulation-distance',
-  'spawn-protection',
-  'enable-rcon',
-  'rcon.port',
-]
+const FALLBACK_KEYS = ['motd', 'server-port', 'max-players', 'difficulty', 'gamemode', 'online-mode', 'allow-flight', 'enable-rcon', 'rcon.port', 'view-distance', 'simulation-distance', 'spawn-protection']
 
-const COLOR_CODES = [
-  ['§0', 'Black', '#000000'],
-  ['§1', 'Dark Blue', '#0000AA'],
-  ['§2', 'Dark Green', '#00AA00'],
-  ['§3', 'Dark Aqua', '#00AAAA'],
-  ['§4', 'Dark Red', '#AA0000'],
-  ['§5', 'Dark Purple', '#AA00AA'],
-  ['§6', 'Gold', '#FFAA00'],
-  ['§7', 'Gray', '#AAAAAA'],
-  ['§8', 'Dark Gray', '#555555'],
-  ['§9', 'Blue', '#5555FF'],
-  ['§a', 'Green', '#55FF55'],
-  ['§b', 'Aqua', '#55FFFF'],
-  ['§c', 'Red', '#FF5555'],
-  ['§d', 'Pink', '#FF55FF'],
-  ['§e', 'Yellow', '#FFFF55'],
-  ['§f', 'White', '#FFFFFF'],
-]
-
-const FORMAT_CODES = [
-  ['§l', 'Bold'],
-  ['§o', 'Italic'],
-  ['§n', 'Underline'],
-  ['§m', 'Strike'],
-  ['§r', 'Reset'],
-]
-
-const COLOR_MAP = Object.fromEntries(COLOR_CODES.map(([code, , color]) => [code, color]))
-
-function labelForKey(key) {
-  const labels = {
-    motd: 'Message of the Day',
-    'max-players': 'Max Players',
-    'server-port': 'Server Port',
-    'online-mode': 'Online Mode',
-    'white-list': 'Whitelist',
-    difficulty: 'Difficulty',
-    gamemode: 'Default Gamemode',
-    pvp: 'PvP',
-    'view-distance': 'View Distance',
-    'simulation-distance': 'Simulation Distance',
-    'spawn-protection': 'Spawn Protection',
-    'enable-rcon': 'Enable RCON',
-    'rcon.port': 'RCON Port',
-  }
-
-  return labels[key] || key
+function normalizeProps(data) {
+  if (!data) return []
+  if (Array.isArray(data.properties)) return data.properties.map((item) => typeof item === 'string' ? { key: item, value: '' } : item)
+  const obj = data.properties || data
+  return Object.entries(obj).filter(([, value]) => typeof value !== 'object').map(([key, value]) => ({ key, value }))
 }
 
-function selectOptions(key) {
-  const map = {
-    difficulty: ['peaceful', 'easy', 'normal', 'hard'],
-    gamemode: ['survival', 'creative', 'adventure', 'spectator'],
-    pvp: ['true', 'false'],
-    'online-mode': ['true', 'false'],
-    'white-list': ['true', 'false'],
-    'enable-rcon': ['true', 'false'],
-  }
-  return map[key] || null
-}
-
-function renderMotd(text) {
-  const lines = String(text || '').split('\n')
-  let style = { color: '#e5e7eb', fontWeight: 400, fontStyle: 'normal', textDecoration: 'none' }
-
-  return lines.map((line, lineIndex) => {
-    const parts = []
-    let buffer = ''
-
-    function flush(i) {
-      if (!buffer) return
-      parts.push(<span key={`${lineIndex}-${i}-${parts.length}`} style={style}>{buffer}</span>)
-      buffer = ''
-    }
-
-    for (let i = 0; i < line.length; i += 1) {
-      if (line[i] === '§' && i + 1 < line.length) {
-        flush(i)
-        const code = `§${line[i + 1].toLowerCase()}`
-
-        if (COLOR_MAP[code]) style = { ...style, color: COLOR_MAP[code] }
-        if (code === '§l') style = { ...style, fontWeight: 700 }
-        if (code === '§o') style = { ...style, fontStyle: 'italic' }
-        if (code === '§n') style = { ...style, textDecoration: 'underline' }
-        if (code === '§m') style = { ...style, textDecoration: 'line-through' }
-        if (code === '§r') style = { color: '#e5e7eb', fontWeight: 400, fontStyle: 'normal', textDecoration: 'none' }
-
-        i += 1
-      } else {
-        buffer += line[i]
-      }
-    }
-
-    flush('end')
-    return <div key={lineIndex}>{parts.length ? parts : <span>&nbsp;</span>}</div>
-  })
-}
-
-function PropertyField({ name, value, onChange }) {
-  const options = selectOptions(name)
-
+function TabButton({ active, children, onClick }) {
   return (
-    <div className="property-row">
-      <div className="property-meta">
-        <div className="property-title">{labelForKey(name)}</div>
-        <div className="property-key font-monospace">{name}</div>
-      </div>
-
-      <div className="property-input-wrap">
-        {options ? (
-          <select className="form-select" value={value ?? ''} onChange={(e) => onChange(name, e.target.value)}>
-            {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-        ) : (
-          <input
-            className="form-control font-monospace"
-            value={value ?? ''}
-            onChange={(e) => onChange(name, e.target.value)}
-            placeholder={`value untuk ${name}`}
-            disabled={name === 'motd'}
-          />
-        )}
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-panel border px-3 py-2 text-sm font-semibold transition ${active ? 'border-[color-mix(in_srgb,var(--accent)_35%,transparent)] bg-[var(--accent-dim2)] text-[var(--accent-text)]' : 'border-borderc bg-panel text-dim hover:bg-hover hover:text-textc'}`}
+    >
+      {children}
+    </button>
   )
 }
 
 export default function Settings() {
   const toast = useToast()
-  const motdRef = useRef(null)
-  const [props, setProps] = useState({})
-  const [motd, setMotd] = useState('')
-  const [iconFile, setIconFile] = useState(null)
-  const [iconPreview, setIconPreview] = useState('')
-  const [serverDir, setServerDir] = useState('')
+  const fileRef = useRef(null)
+
+  const [tab, setTab] = useState('server')
+  const [props, setProps] = useState([])
+  const [branding, setBranding] = useState({ server_name: '', motd: '', icon_url: '' })
   const [query, setQuery] = useState('')
-  const [mode, setMode] = useState('important')
-  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
-      let properties = {}
-      let branding = null
-
-      try {
-        const data = await getJson('/api/settings/properties')
-        properties = data.properties || {}
-      } catch {
-        const data = await getJson('/api/settings')
-        properties = data.props || {}
-      }
-
-      try {
-        branding = await getJson('/api/settings/branding')
-      } catch {
-        branding = null
-      }
-
-      setProps(properties)
-      setMotd((branding?.motd || properties.motd || '').replace(/\\n/g, '\n'))
-      setServerDir(branding?.server_dir || '')
-      setIconPreview(branding?.icon_url ? apiUrl(branding.icon_url) : '')
+      let propData = null
+      try { propData = await getJson('/api/settings/properties') } catch { propData = await getJson('/api/settings') }
+      const rows = normalizeProps(propData)
+      setProps(rows.length ? rows : FALLBACK_KEYS.map((key) => ({ key, value: '' })))
+      try { setBranding(await getJson('/api/settings/branding')) } catch {}
     } catch (e) {
-      toast(e.message, 'danger')
-    } finally {
-      setLoading(false)
+      toast(e.message || 'Gagal memuat settings.', 'danger')
     }
   }, [toast])
 
@@ -196,204 +53,140 @@ export default function Settings() {
     load()
   }, [load])
 
-  function setVal(key, value) {
-    setProps((old) => ({ ...old, [key]: value }))
-  }
+  const filteredProps = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return props
+    return props.filter((item) => [item.key, item.value].join(' ').toLowerCase().includes(q))
+  }, [props, query])
 
-  function insertMotd(code) {
-    const el = motdRef.current
-    if (!el) {
-      setMotd((old) => `${old}${code}`)
-      return
-    }
-
-    const start = el.selectionStart
-    const end = el.selectionEnd
-    const next = `${motd.slice(0, start)}${code}${motd.slice(end)}`
-    setMotd(next)
-
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(start + code.length, start + code.length)
-    })
-  }
-
-  function onPickIcon(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setIconFile(file)
-    setIconPreview(URL.createObjectURL(file))
+  function updateProp(key, value) {
+    setProps((rows) => rows.map((row) => row.key === key ? { ...row, value } : row))
   }
 
   async function saveProperties() {
-    const payload = { ...props, motd: motd.replace(/\n/g, '\\n') }
-
+    setBusy(true)
+    const payload = Object.fromEntries(props.map((item) => [item.key, item.value]))
     try {
       let data
-      try {
-        data = await postJson('/api/settings/properties', { properties: payload })
-      } catch {
-        data = await postJson('/api/settings/save', payload)
-      }
-      toast(data.message || 'server.properties berhasil disimpan.', data.success !== false ? 'success' : 'danger')
-      await load()
+      try { data = await postJson('/api/settings/properties', { properties: payload }) } catch { data = await postJson('/api/settings/save', payload) }
+      toast(data.message || 'Server properties disimpan.', data.success === false ? 'danger' : 'success')
     } catch (e) {
-      toast(e.message, 'danger')
+      toast(e.message || 'Gagal menyimpan server properties.', 'danger')
+    } finally {
+      setBusy(false)
     }
   }
 
-  async function saveBranding() {
+  async function saveBranding(e) {
+    e.preventDefault()
+    setBusy(true)
     try {
-      const form = new FormData()
-      form.append('motd', motd)
-      if (iconFile) form.append('icon', iconFile)
-
-      try {
-        const data = await postForm('/api/settings/branding', form)
-        toast(data.message || 'Branding berhasil disimpan.', data.success !== false ? 'success' : 'danger')
-      } catch {
-        await saveProperties()
-        toast('MOTD disimpan. Endpoint upload icon tidak tersedia di backend ini.', 'warning')
-      }
-
-      setIconFile(null)
-      await load()
-    } catch (e) {
-      toast(e.message, 'danger')
+      const form = new FormData(e.currentTarget)
+      const file = fileRef.current?.files?.[0]
+      if (file) form.append('icon', file)
+      const data = await postForm('/api/settings/branding', form)
+      toast(data.message || 'Appearance disimpan.', data.success === false ? 'danger' : 'success')
+      try { setBranding(await getJson('/api/settings/branding')) } catch {}
+    } catch (err) {
+      toast(err.message || 'Gagal menyimpan appearance.', 'danger')
+    } finally {
+      setBusy(false)
     }
   }
-
-  const propertyEntries = useMemo(() => {
-    let entries = Object.entries(props)
-
-    if (mode === 'important') {
-      const set = new Set(IMPORTANT_KEYS)
-      entries = entries.filter(([key]) => set.has(key))
-    }
-
-    const q = query.trim().toLowerCase()
-    if (q) {
-      entries = entries.filter(([key, value]) => `${key} ${labelForKey(key)} ${value}`.toLowerCase().includes(q))
-    }
-
-    entries.sort(([a], [b]) => {
-      const ai = IMPORTANT_KEYS.indexOf(a)
-      const bi = IMPORTANT_KEYS.indexOf(b)
-      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
-      return a.localeCompare(b)
-    })
-
-    return entries
-  }, [props, query, mode])
 
   return (
-    <>
-      <PageHeader
-        eyebrow="Settings"
-        title="Server settings"
-        description="Branding dan konfigurasi server.properties dari panel web."
-        actions={(
-          <div className="d-flex gap-2 flex-wrap">
-            <button className="btn btn-soft" onClick={load} disabled={loading}>{loading ? 'Loading...' : 'Refresh'}</button>
-            <button className="btn btn-primary" onClick={saveProperties}>Save properties</button>
-          </div>
-        )}
-      />
+    <div className="space-y-3">
+      <PageHeader eyebrow="Settings" title="Pengaturan" desc="Server settings dan appearance dipisah supaya lebih ringkas." actions={<button className="btn" onClick={load}><Icon name="refresh" className="h-3.5 w-3.5" />Refresh</button>} />
 
-      <div className="row g-4">
-        <div className="col-xl-5">
-          <div className="panel-card h-100">
+      <nav className="flex flex-wrap gap-2">
+        <TabButton active={tab === 'server'} onClick={() => setTab('server')}>Server settings</TabButton>
+        <TabButton active={tab === 'appearance'} onClick={() => setTab('appearance')}>Appearance</TabButton>
+      </nav>
+
+      {tab === 'server' ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="panel-title">server.properties</h3>
+              <p className="panel-subtitle">Edit konfigurasi server Paper dari dashboard.</p>
+            </div>
+            <button className="btn btn-sm btn-accent" disabled={busy} onClick={saveProperties}><Icon name="save" className="h-3.5 w-3.5" />Simpan</button>
+          </div>
+
+          <div className="border-b border-soft p-3">
+            <SearchBar value={query} onChange={setQuery} placeholder="Cari property, contoh: difficulty, motd, rcon..." />
+          </div>
+
+          <div className="divide-y divide-soft">
+            {filteredProps.map((item) => (
+              <div key={item.key} className="grid grid-cols-1 gap-2 px-3.5 py-3 md:grid-cols-[230px_1fr] md:items-center">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-textc">{item.key}</div>
+                  <div className="truncate font-mono text-[11px] text-faint" title={String(item.value ?? '')}>current: {String(item.value ?? '')}</div>
+                </div>
+                <input className="input font-mono" value={item.value ?? ''} onChange={(e) => updateProp(item.key, e.target.value)} />
+              </div>
+            ))}
+            {!filteredProps.length ? <div className="p-6"><p className="text-center text-sm text-faint">Property tidak ditemukan.</p></div> : null}
+          </div>
+        </section>
+      ) : null}
+
+      {tab === 'appearance' ? (
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[360px_1fr]">
+          <section className="panel h-fit">
             <div className="panel-head">
               <div>
-                <h3>Branding</h3>
-                <p>Server icon dan MOTD untuk server list Minecraft.</p>
+                <h3 className="panel-title">Web appearance</h3>
+                <p className="panel-subtitle">Warna aksen dashboard.</p>
               </div>
             </div>
+            <div className="p-3">
+              <AccentPicker />
+            </div>
+          </section>
 
-            <div className="branding-preview mb-4">
-              <div className="server-icon-preview">
-                {iconPreview ? <img src={iconPreview} alt="server-icon" /> : <span>64</span>}
+          <form onSubmit={saveBranding} className="panel">
+            <div className="panel-head">
+              <div>
+                <h3 className="panel-title">Server profile</h3>
+                <p className="panel-subtitle">Nama, MOTD, dan icon server.</p>
               </div>
-              <div className="min-w-0">
-                <div className="fw-semibold text-light mb-1">Atomic PooPerS</div>
-                <div className="motd-preview font-monospace">
-                  {renderMotd(motd || '§7A Minecraft Server')}
+              <button className="btn btn-sm btn-accent" disabled={busy}><Icon name="save" className="h-3.5 w-3.5" />Simpan</button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-[180px_1fr]">
+              <div className="rounded-panel border border-soft bg-raised p-3">
+                <div className="grid aspect-square place-items-center overflow-hidden rounded-panel border border-borderc bg-[#090909]">
+                  {branding.icon_url ? <img src={branding.icon_url} alt="Server icon" className="h-full w-full object-cover [image-rendering:pixelated]" /> : <Icon name="box" className="h-10 w-10 text-faint" />}
+                </div>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-xs font-semibold text-dim">Server icon</span>
+                  <input ref={fileRef} className="input text-xs" type="file" accept="image/png,image/jpeg,image/webp" />
+                </label>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-dim">Server name</span>
+                  <input className="input" name="server_name" placeholder="Atomic PooPerS" value={branding.server_name || ''} onChange={(e) => setBranding((old) => ({ ...old, server_name: e.target.value }))} />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-dim">MOTD</span>
+                  <textarea className="input min-h-32 font-mono text-xs leading-6" name="motd" value={branding.motd || ''} onChange={(e) => setBranding((old) => ({ ...old, motd: e.target.value }))} />
+                </label>
+                <div className="rounded-panel border border-soft bg-raised p-3">
+                  <div className="text-xs font-semibold text-dim">Preview</div>
+                  <div className="mt-2 rounded-panel border border-borderc bg-panel p-3">
+                    <div className="truncate text-sm font-semibold text-textc">{branding.server_name || 'Atomic PooPerS'}</div>
+                    <pre className="mt-1 whitespace-pre-wrap font-mono text-xs leading-5 text-dim">{branding.motd || 'MOTD server akan tampil di sini.'}</pre>
+                  </div>
                 </div>
               </div>
             </div>
-
-            <label className="form-label text-muted small fw-medium">Server icon</label>
-            <input className="form-control mb-3" type="file" accept="image/png,image/jpeg,image/webp" onChange={onPickIcon} />
-
-            <label className="form-label text-muted small fw-medium">MOTD</label>
-            <textarea
-              ref={motdRef}
-              className="form-control font-monospace mb-3"
-              rows="4"
-              value={motd}
-              onChange={(e) => setMotd(e.target.value)}
-              placeholder="§b§lAtomic PooPerS §8» §fSurvival Private"
-            />
-
-            <div className="color-grid mb-3">
-              {COLOR_CODES.map(([code, label, color]) => (
-                <button key={code} type="button" className="btn btn-sm btn-soft" onClick={() => insertMotd(code)} title={label}>
-                  <span style={{ color }}>■</span> {code}
-                </button>
-              ))}
-            </div>
-
-            <div className="d-flex flex-wrap gap-2 mb-4">
-              {FORMAT_CODES.map(([code, label]) => (
-                <button key={code} type="button" className="btn btn-sm btn-soft" onClick={() => insertMotd(code)}>
-                  {label} <span className="font-monospace">{code}</span>
-                </button>
-              ))}
-            </div>
-
-            <button className="btn btn-primary w-100" onClick={saveBranding}>Save branding</button>
-
-            <div className="helper-note mt-3">
-              Restart server Minecraft diperlukan agar icon/MOTD terlihat di client.
-              {serverDir ? <div className="font-monospace mt-2">{serverDir}</div> : null}
-            </div>
-          </div>
+          </form>
         </div>
-
-        <div className="col-xl-7">
-          <div className="panel-card h-100">
-            <div className="panel-head align-items-start">
-              <div>
-                <h3>server.properties</h3>
-                <p>Search khusus key/value konfigurasi server.</p>
-              </div>
-              <div className="segmented">
-                <button className={mode === 'important' ? 'active' : ''} onClick={() => setMode('important')}>Important</button>
-                <button className={mode === 'all' ? 'active' : ''} onClick={() => setMode('all')}>All</button>
-              </div>
-            </div>
-
-            <div className="table-toolbar px-0 pt-0">
-              <SearchBar
-                value={query}
-                onChange={setQuery}
-                placeholder="Cari: rcon, whitelist, distance, pvp..."
-                className="flex-grow-1"
-              />
-            </div>
-
-            <div className="settings-list">
-              {propertyEntries.length ? (
-                propertyEntries.map(([key, value]) => (
-                  <PropertyField key={key} name={key} value={key === 'motd' ? motd : value} onChange={setVal} />
-                ))
-              ) : (
-                <EmptyState title="Tidak ada property cocok" description="Ubah kata kunci atau pindah mode ke All." />
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
+      ) : null}
+    </div>
   )
 }

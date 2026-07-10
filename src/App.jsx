@@ -1,12 +1,9 @@
 import React from 'react'
 import { Route, Routes } from 'react-router-dom'
-
 import Layout from './components/Layout.jsx'
 import RequireAuth from './components/RequireAuth.jsx'
-
 import { ToastProvider } from './contexts/ToastContext.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
-
 import AdminActivity from './pages/AdminActivity.jsx'
 import Backups from './pages/Backups.jsx'
 import Console from './pages/Console.jsx'

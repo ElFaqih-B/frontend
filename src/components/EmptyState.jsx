@@ -1,10 +1,4 @@
 import React from 'react'
-
-export default function EmptyState({ title = 'Tidak ada data', description = '' }) {
-  return (
-    <div className="empty-state">
-      <div className="empty-title">{title}</div>
-      {description ? <div className="empty-desc">{description}</div> : null}
-    </div>
-  )
+export default function EmptyState({ title = 'Kosong', desc = 'Belum ada data.' }) {
+  return <div className="px-4 py-8 text-center"><div className="font-semibold text-textc">{title}</div><div className="mt-1 text-sm text-faint">{desc}</div></div>
 }
